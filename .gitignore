@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# uv
+.python-version
+
+# Models — large binary files, re-downloaded via scripts/download_models.py
+models/
+!models/.gitkeep
+
+# Data — private user data never goes to git
+data/
+!data/.gitkeep
+
+# Config with secrets
+config/settings.local.toml
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# HuggingFace cache
+.cache/

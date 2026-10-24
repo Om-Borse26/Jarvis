@@ -1,0 +1,130 @@
+# ============================================================
+#  J.A.R.V.I.S. — Master Configuration
+#  Edit this file to customize your Jarvis experience.
+# ============================================================
+
+[jarvis]
+name          = "Jarvis"
+version       = "0.1.0"
+user_name     = "Sir"         # How Jarvis addresses you
+personality   = "calm_professional"  # calm_professional | witty | formal | casual
+
+[audio]
+# Input device — Intel Smart Sound Technology Array (4-channel WASAPI)
+input_device_index  = 9       # WASAPI mic array (auto-detected on first run)
+output_device_index = 8       # WASAPI speakers (auto-detected on first run)
+sample_rate         = 16000   # Hz — optimal for Whisper
+channels            = 1       # Mono for STT
+vad_threshold       = 0.5     # Silero VAD sensitivity (0.0–1.0)
+ring_buffer_seconds = 30      # Circular buffer size
+
+[wake_word]
+enabled         = true        # 🔀 TOGGLE: true = "Hey Jarvis", false = hotkey only
+word            = "hey_jarvis"
+model_path      = "models/wake_word"
+sensitivity     = 0.6         # Wake word confidence threshold (0.0–1.0)
+
+[hotkey]
+enabled         = true        # 🔀 TOGGLE: always active alongside or instead of wake word
+trigger_keys    = ["win", "j"] # Win+J to trigger listening
+toggle_wake_word = ["win", "shift", "j"]  # Win+Shift+J to toggle wake word on/off at runtime
+
+[stt]
+model           = "Systran/faster-distil-whisper-medium.en"
+model_path      = "models/whisper"
+device          = "cuda"       # cuda | cpu
+compute_type    = "float16"    # float16 on CUDA, int8 on CPU
+beam_size       = 3
+language        = "en"
+
+[tts]
+engine          = "kokoro"     # kokoro | piper
+model_path      = "models/kokoro"
+voice           = "af_heart"   # Kokoro voice ID — calm, natural
+speed           = 1.0          # 0.8–1.3 range
+device          = "cpu"        # kokoro runs well on CPU; frees GPU for LLM
+
+[llm]
+# ── Model routing thresholds ──────────────────────────────────
+fast_model      = "qwen3.5:4b"              # Always-resident in VRAM
+code_model      = "qwen2.5-coder:7b"        # Coding, scripting, MCP generation
+deep_model      = "gemma4:latest"            # Complex reasoning, screen vision
+long_ctx_model  = "qwen3.5-32k:latest"      # When context > 8K tokens
+ollama_host     = "http://127.0.0.1:11434"
+stream          = true
+timeout_seconds = 30
+
+# Task routing rules — Jarvis decides which model to use
+[llm.routing]
+code_keywords        = ["code", "script", "write a function", "debug", "fix this", "automate"]
+deep_keywords        = ["analyze", "explain in detail", "plan", "strategy", "summarize document", "screen"]
+long_context_trigger = 8000  # tokens — switch to 32K model above this
+
+[memory]
+vector_model    = "sentence-transformers/all-MiniLM-L6-v2"
+vector_path     = "data/vectors"
+state_db_path   = "data/jarvis.db"
+log_path        = "data/logs"
+max_l1_turns    = 20          # Working context window (conversation turns)
+compactor_time  = "02:00"     # Run nightly memory compaction at 2:00 AM
+
+[vault]
+vault_path      = "data/vault.db"
+# Master key is derived from Windows DPAPI — never stored in this file
+# Vault access always requires explicit user voice confirmation
+
+[hud]
+# Window behavior
+always_on_top       = true
+click_through_idle  = true      # Mouse clicks pass through when idle
+opacity_idle        = 0.85      # Orb opacity when not active
+opacity_active      = 1.0
+
+# Position of the ambient orb (corner anchor)
+orb_anchor          = "bottom_right"  # bottom_right | bottom_left | top_right
+orb_size_idle       = 64        # px
+orb_size_active     = 120       # px
+
+# Colors (CSS hex)
+color_primary       = "#00d4ff"  # Cyan glow
+color_secondary     = "#7b61ff"  # Violet accent
+color_bg            = "#0a0f1e"  # Deep navy
+
+hud_port            = 7474       # Internal WebSocket port
+
+[browser]
+default             = "brave"
+brave_path          = 'C:\Users\ombor\AppData\Local\BraveSoftware\Brave-Browser\Application\brave.exe'
+chrome_path         = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
+# Add more browsers here. Jarvis uses 'default' unless you say otherwise.
+
+[mood]
+enabled             = true
+engine              = "librosa"   # librosa (acoustic rules) | speechbrain (neural)
+update_interval_sec = 30          # Re-assess mood every 30 seconds of speech
+# Mood states: focused | relaxed | stressed | tired | energized | neutral
+
+[safety]
+# Action levels:
+#   L0 = read-only/ambient         → silent execution
+#   L1 = non-destructive local     → subtle HUD chime
+#   L2 = critical/outgoing/destruct → MANDATORY voice or HUD confirmation
+critical_keywords = [
+    "send", "delete", "remove", "format", "install", "uninstall",
+    "post", "upload", "submit", "purchase", "pay", "transfer",
+    "shutdown", "restart", "registry"
+]
+
+[mcp]
+registry_db_path    = "config/tools_registry.json"
+auto_search_online  = true    # Search GitHub/MCP registry for new tools
+auto_generate       = true    # Generate MCPs using qwen2.5-coder if not found
+sandbox_execution   = true    # Run generated MCPs in subprocess sandbox
+
+[eve]
+enabled             = false   # Enable when Eve is set up on phone
+sync_port           = 8475
+sync_mode           = "lan"   # lan | tailscale
+proximity_method    = "arp"   # arp (LAN MAC detection) | bluetooth
+nothing_phone_mac   = ""      # Fill in after first pairing: e.g. "AA:BB:CC:DD:EE:FF"
+greeting_on_arrival = true
