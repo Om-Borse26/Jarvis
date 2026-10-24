@@ -102,6 +102,205 @@ def ocr_screen() -> str:
         return f"Failed to extract screen text: {e}"
 
 
+# ─── Visual Grounding (set-of-marks) ──────────────────────────────────────────
+# Detect on-screen text elements with bounding boxes so the agent can click by
+# description or by a numbered label instead of guessing pixel coordinates.
+
+_LAST_ELEMENTS: list[dict] = []
+_EASYOCR_READER = None
+
+
+def _scale(img) -> tuple[float, float]:
+    """Factor to convert image pixels → screen coordinates (handles DPI scaling)."""
+    try:
+        import pyautogui
+        sw, sh = pyautogui.size()
+        iw, ih = img.size
+        if iw and ih:
+            return sw / iw, sh / ih
+    except Exception:
+        pass
+    return 1.0, 1.0
+
+
+def _mk(text: str, x, y, w, h, sx: float, sy: float) -> dict:
+    """Build an element record with its center already in screen coordinates."""
+    cx = (x + w / 2) * sx
+    cy = (y + h / 2) * sy
+    return {"text": text.strip(), "cx": int(cx), "cy": int(cy),
+            "w": int(w * sx), "h": int(h * sy)}
+
+
+def _detect_text_elements(img) -> list[dict]:
+    """Detect text elements with boxes. Tries pytesseract → easyocr → winocr."""
+    sx, sy = _scale(img)
+    elements: list[dict] = []
+
+    # 1. pytesseract (fast, deterministic boxes)
+    try:
+        import pytesseract
+        data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
+        for i in range(len(data["text"])):
+            t = (data["text"][i] or "").strip()
+            raw_conf = str(data["conf"][i])
+            conf = int(raw_conf) if raw_conf.lstrip("-").isdigit() else -1
+            if t and conf > 40:
+                elements.append(_mk(t, data["left"][i], data["top"][i],
+                                    data["width"][i], data["height"][i], sx, sy))
+        if elements:
+            return elements
+    except Exception:
+        pass
+
+    # 2. easyocr (slower, robust; reader cached)
+    try:
+        import numpy as np
+        global _EASYOCR_READER
+        if _EASYOCR_READER is None:
+            import easyocr
+            _EASYOCR_READER = easyocr.Reader(["en"], gpu=False)
+        for bbox, text, conf in _EASYOCR_READER.readtext(np.array(img)):
+            if text.strip() and conf > 0.4:
+                xs = [p[0] for p in bbox]
+                ys = [p[1] for p in bbox]
+                x, y = min(xs), min(ys)
+                elements.append(_mk(text, x, y, max(xs) - x, max(ys) - y, sx, sy))
+        if elements:
+            return elements
+    except Exception:
+        pass
+
+    return elements
+
+
+def _best_match(query: str, els: list[dict]) -> dict | None:
+    """Pick the element whose visible text best matches the query."""
+    import difflib
+    q = (query or "").strip().lower()
+    if not q or not els:
+        return None
+    best, best_score = None, 0.0
+    q_tokens = set(q.split())
+    for e in els:
+        t = e["text"].lower()
+        if not t:
+            continue
+        if q == t:
+            score = 1.0
+        elif q in t:
+            score = 0.9
+        elif t in q:
+            score = 0.8
+        else:
+            score = difflib.SequenceMatcher(None, q, t).ratio()
+            t_tokens = set(t.split())
+            if q_tokens & t_tokens:
+                score = max(score, len(q_tokens & t_tokens) / len(q_tokens | t_tokens))
+        if score > best_score:
+            best, best_score = e, score
+    return best if best_score >= 0.5 else None
+
+
+def _capture_and_detect() -> tuple[object, list[dict]]:
+    import pyautogui
+    img = pyautogui.screenshot()
+    return img, _detect_text_elements(img)
+
+
+@register_tool(
+    name="click_text",
+    description="Click the on-screen element (button, link, menu item, tab, field label) whose visible text best matches the given text. Far more reliable than guessing coordinates — prefer this for clicking UI.",
+    category="computer_use",
+)
+def click_text(text: str, double: bool = False, right: bool = False) -> str:
+    """Find the element whose text matches and click its center."""
+    try:
+        import pyautogui
+        _img, els = _capture_and_detect()
+        if not els:
+            return "I couldn't read any clickable text on the screen."
+        match = _best_match(text, els)
+        if not match:
+            return f"I couldn't find anything matching '{text}' on the screen."
+        cx, cy = match["cx"], match["cy"]
+        if right:
+            pyautogui.rightClick(cx, cy)
+        elif double:
+            pyautogui.doubleClick(cx, cy)
+        else:
+            pyautogui.click(cx, cy)
+        return f"Clicked '{match['text']}' at ({cx}, {cy})."
+    except Exception as e:
+        logger.error(f"click_text error: {e}")
+        return f"Failed to click '{text}': {e}"
+
+
+@register_tool(
+    name="label_screen_elements",
+    description="Detect clickable text elements on screen and return them as a NUMBERED list (set-of-marks). Use when you need to choose precisely among options, then click one with click_labeled_element.",
+    category="computer_use",
+)
+def label_screen_elements(max_elements: int = 40) -> str:
+    """Produce a numbered list of on-screen text elements for precise selection."""
+    try:
+        img, els = _capture_and_detect()
+        els = els[:max_elements]
+        _LAST_ELEMENTS.clear()
+        _LAST_ELEMENTS.extend(els)
+        _save_annotated(img, els)
+        if not els:
+            return "No text elements were detected on the screen."
+        lines = [f"[{i}] {e['text']}" for i, e in enumerate(els)]
+        return "Screen elements (use click_labeled_element with the number):\n" + "\n".join(lines)
+    except Exception as e:
+        logger.error(f"label_screen_elements error: {e}")
+        return f"Failed to label screen elements: {e}"
+
+
+@register_tool(
+    name="click_labeled_element",
+    description="Click an element by its number from the most recent label_screen_elements call.",
+    category="computer_use",
+)
+def click_labeled_element(index: int, double: bool = False, right: bool = False) -> str:
+    """Click a previously labeled element by its index."""
+    try:
+        import pyautogui
+        if index < 0 or index >= len(_LAST_ELEMENTS):
+            return "That element number isn't available. Call label_screen_elements first."
+        e = _LAST_ELEMENTS[index]
+        cx, cy = e["cx"], e["cy"]
+        if right:
+            pyautogui.rightClick(cx, cy)
+        elif double:
+            pyautogui.doubleClick(cx, cy)
+        else:
+            pyautogui.click(cx, cy)
+        return f"Clicked [{index}] '{e['text']}' at ({cx}, {cy})."
+    except Exception as e:
+        return f"Failed to click element {index}: {e}"
+
+
+def _save_annotated(img, els: list[dict]) -> None:
+    """Save a screenshot with numbered marks for debugging/vision (best-effort)."""
+    try:
+        from PIL import ImageDraw
+        sx, sy = _scale(img)
+        annotated = img.copy()
+        draw = ImageDraw.Draw(annotated)
+        for i, e in enumerate(els):
+            # Convert the stored screen-space center back to image space for drawing.
+            ix = e["cx"] / sx if sx else e["cx"]
+            iy = e["cy"] / sy if sy else e["cy"]
+            draw.rectangle([ix - 4, iy - 8, ix + 14, iy + 8], outline="red", width=1)
+            draw.text((ix - 3, iy - 7), str(i), fill="red")
+        save_dir = Path("data/screenshots")
+        save_dir.mkdir(parents=True, exist_ok=True)
+        annotated.save(str(save_dir / "labeled.png"))
+    except Exception:
+        pass
+
+
 # ─── Mouse Actions ─────────────────────────────────────────────────────────────
 
 @register_tool(
