@@ -104,17 +104,31 @@ class OllamaClient:
         first_token = True
 
         try:
+            in_think_block = False
             async for chunk in await self._client.chat(
                 model    = model,
                 messages = messages,
                 stream   = True,
-                options  = {"num_ctx": 8192},
+                options  = {"num_ctx": 4096},
+                think    = False,
             ):
                 if cancel_event and cancel_event.is_set():
                     logger.debug("LLM stream cancelled.")
                     return
 
-                token = chunk["message"]["content"]
+                token = chunk.get("message", {}).get("content", "")
+                if not token:
+                    continue
+
+                # Filter out any stray thinking tags
+                if "<think>" in token:
+                    in_think_block = True
+                    token = token.split("<think>")[0]
+                if "</think>" in token:
+                    in_think_block = False
+                    token = token.split("</think>")[-1]
+                if in_think_block or not token:
+                    continue
 
                 if first_token:
                     ttft = (time.perf_counter() - t0) * 1000

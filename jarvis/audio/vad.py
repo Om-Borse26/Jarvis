@@ -68,10 +68,12 @@ class VADListener:
     def start(self):
         """Load Silero VAD and begin listening on the microphone."""
         logger.info("Loading Silero VAD v5...")
+        torch.hub.set_dir("models/silero_vad")
         self._model, utils = torch.hub.load(
             repo_or_dir="snakers4/silero-vad",
             model="silero_vad",
             trust_repo=True,
+            verbose=False,
         )
         self._model.eval()
         logger.success("Silero VAD loaded.")
