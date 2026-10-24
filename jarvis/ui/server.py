@@ -76,6 +76,17 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _file_abs(self, path: Path) -> None:
+        if not path.exists():
+            self.send_error(404)
+            return
+        body = path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", _CTYPES.get(path.suffix, "text/plain"))
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _body(self) -> dict:
         try:
             n = int(self.headers.get("Content-Length", 0))
@@ -90,6 +101,8 @@ class _Handler(BaseHTTPRequestHandler):
             return self._file("dashboard.html")
         if r == "/orb":
             return self._file("orb.html")
+        if r == "/hud":
+            return self._file_abs(Path(__file__).resolve().parents[1] / "hud" / "web" / "hud.html")
         if r.startswith("/static/"):
             return self._file(r[len("/static/"):])
         if r == "/api/state":
@@ -106,6 +119,9 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json({"history": episodic_memory.recent(15)})
         if r == "/api/audit":
             return self._json({"audit": _read_audit_tail(50)})
+        if r == "/api/hud":
+            from jarvis.hud.manager import hud_manager
+            return self._json(hud_manager.snapshot())
         if r == "/api/startup":
             from jarvis.core.lifecycle import is_startup_enabled
             return self._json({"enabled": is_startup_enabled()})
@@ -124,6 +140,10 @@ class _Handler(BaseHTTPRequestHandler):
         if r == "/api/reminders/cancel":
             from jarvis.core.scheduler import scheduler
             return self._json({"ok": scheduler.cancel(int(body.get("id", -1)))})
+        if r == "/api/hud/respond":
+            from jarvis.hud.manager import hud_manager
+            hud_manager.respond(bool(body.get("approved", False)))
+            return self._json({"ok": True})
         if r == "/api/startup":
             from jarvis.core.lifecycle import enable_startup, disable_startup
             ok = enable_startup() if body.get("enabled") else disable_startup()

@@ -83,6 +83,7 @@ autostart_servers = ["playwright"]
 enabled     = true        # Control server (orb + dashboard)
 http_port   = 8787        # Local dashboard/orb at http://127.0.0.1:8787
 launch_orb  = true        # Spawn the desktop orb overlay on startup
+launch_hud  = true        # Spawn the HUD overlay (notifications + confirmations)
 
 [hud]
 # Window behavior

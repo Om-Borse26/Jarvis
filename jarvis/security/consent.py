@@ -70,6 +70,8 @@ class ConsentManager:
         # Set by the pipeline at startup.
         self.speak_fn: Optional[Callable[[str], Awaitable]] = None
         self.arm_fn: Optional[Callable[[], None]] = None
+        self.hud_fn: Optional[Callable[[str], None]] = None   # show a visual confirmation card
+        self._loop = None                                     # event loop for thread-safe resolve
 
     # ── State ─────────────────────────────────────────────────────────────────
     def is_pending(self) -> bool:
@@ -91,6 +93,7 @@ class ConsentManager:
             return False
 
         loop = asyncio.get_event_loop()
+        self._loop = loop
         self._pending = loop.create_future()
         self._pending_desc = description
         logger.info(f"[Consent] Awaiting confirmation: {description}")
@@ -98,6 +101,8 @@ class ConsentManager:
         prompt = f"{description} Shall I proceed?"
         if self.speak_fn:
             await self.speak_fn(prompt)
+        if self.hud_fn:
+            self.hud_fn(description)
         if self.arm_fn:
             self.arm_fn()
 
@@ -119,6 +124,13 @@ class ConsentManager:
         """Called by the pipeline when the user's yes/no utterance arrives."""
         if self._pending and not self._pending.done():
             self._pending.set_result(approved)
+
+    def resolve_threadsafe(self, approved: bool) -> None:
+        """Resolve from another thread (e.g. a HUD button click via the HTTP server)."""
+        if self._loop is not None:
+            self._loop.call_soon_threadsafe(self.resolve, approved)
+        else:
+            self.resolve(approved)
 
     def cancel(self) -> None:
         """Abort any pending confirmation (treated as a 'no')."""

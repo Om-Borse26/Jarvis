@@ -101,10 +101,17 @@ class JarvisPipeline:
         self.consent.speak_fn = self._speak_async
         self.consent.arm_fn   = self._arm_listening
 
+        # ── HUD (visual notifications + confirmation safety gate) ───────
+        from jarvis.hud.manager import hud_manager
+        self.hud = hud_manager
+        self.consent.hud_fn = self.hud.request_confirmation
+        self.hud.on_confirm_response = self.consent.resolve_threadsafe
+
         # ── Proactivity scheduler (reminders / recurring tasks) ─────────
         self.scheduler = scheduler
         self.scheduler.speak_fn   = self._speak_async
         self.scheduler.command_fn = self._run_scheduled_command
+        self.scheduler.notify_fn  = lambda title, body="": self.hud.notify(title, body)
 
         # ── UI: state bridge + control server (orb + dashboard) ─────────
         self._ui_server: Optional[ControlServer] = None
@@ -398,6 +405,7 @@ class JarvisPipeline:
                     self._arm_listening()
                     return
                 self.consent.resolve(verdict)
+                self.hud.clear_confirmation()
                 self._arm_listening()
                 return
 
@@ -574,6 +582,16 @@ class JarvisPipeline:
                 subprocess.Popen([exe, "-m", "jarvis.ui.orb"], creationflags=flags, cwd=str(Path.cwd()))
             except Exception as e:
                 logger.debug(f"[UI] orb not launched: {e}")
+        if ui_cfg.get("launch_hud", True):
+            try:
+                import subprocess, sys
+                py = sys.executable
+                pyw = py.replace("python.exe", "pythonw.exe")
+                exe = pyw if Path(pyw).exists() else py
+                flags = 0x08000000 if __import__("sys").platform == "win32" else 0
+                subprocess.Popen([exe, "-m", "jarvis.hud.window"], creationflags=flags, cwd=str(Path.cwd()))
+            except Exception as e:
+                logger.debug(f"[HUD] window not launched: {e}")
 
     def _open_dashboard(self):
         """Open the dashboard in the default browser (from tray or voice)."""

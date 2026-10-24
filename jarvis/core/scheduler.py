@@ -122,6 +122,7 @@ class Scheduler:
         self._init_db()
         self.speak_fn: Optional[Callable] = None     # async: announce reminders
         self.command_fn: Optional[Callable] = None   # async: run a "do" task through the agent
+        self.notify_fn: Optional[Callable] = None    # sync: push a visual HUD notification
         self._task = None
         logger.debug("[Scheduler] Ready.")
 
@@ -246,6 +247,8 @@ class Scheduler:
     async def _fire_one(self, jid: int, action: str, text: str) -> None:
         logger.info(f"[Scheduler] Firing job {jid} ({action}): {text}")
         try:
+            if self.notify_fn:
+                self.notify_fn("Reminder", text)
             if action == "command" and self.command_fn:
                 await self.command_fn(text)
             elif self.speak_fn:
