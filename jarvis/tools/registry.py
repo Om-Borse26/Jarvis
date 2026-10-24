@@ -126,10 +126,21 @@ class ToolRegistry:
                 result = await tool.func(**kwargs)
             else:
                 result = tool.func(**kwargs)
+            self._audit(tool_name, kwargs, "success", str(result))
             return {"status": "success", "result": result}
         except Exception as e:
             logger.error(f"Tool execution failed for '{tool_name}': {e}")
+            self._audit(tool_name, kwargs, "error", str(e))
             return {"status": "error", "message": f"Error running {tool_name}: {str(e)}"}
+
+    @staticmethod
+    def _audit(tool_name: str, args: dict, status: str, result: str) -> None:
+        """Record the execution in the security audit log (best-effort, never raises)."""
+        try:
+            from jarvis.security.audit import audit
+            audit(tool_name, args, status, result)
+        except Exception:
+            pass
 
     def get_prompt_schema(self) -> str:
         """Generate schema formatted for the LLM system prompt."""

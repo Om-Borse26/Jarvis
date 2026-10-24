@@ -34,6 +34,9 @@ from jarvis.tools import code_executor
 # ── Memory tools ─────────────────────────────────────────────────────────────
 from jarvis.core import memory
 
+# ── Security: encrypted secrets vault + audit tools ──────────────────────────
+from jarvis import security  # noqa: F401  (registers vault tools)
+
 # Auto-discover plugins dynamically from jarvis/tools/plugins/
 PLUGINS_DIR = Path(__file__).parent / "plugins"
 if PLUGINS_DIR.exists():
