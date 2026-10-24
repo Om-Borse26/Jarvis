@@ -97,12 +97,12 @@ class JarvisPipeline:
             )
             raise RuntimeError("Ollama not available.")
 
-        # Pre-warm fast model in GPU VRAM for instant < 200ms response
-        await self.llm.warm_up()
-
-        # 2. Load STT model
+        # 2. Load STT model on CUDA first (establishes fixed audio memory footprint)
         logger.info("Loading STT model...")
         await asyncio.to_thread(self.stt.load)
+
+        # 3. Pre-warm fast LLM with exact 4096 context into remaining GPU VRAM
+        await self.llm.warm_up()
 
         # 3. Load TTS model
         logger.info("Loading TTS model...")
@@ -228,8 +228,9 @@ class JarvisPipeline:
             self._listening = False
             logger.info(f"👤 User: {text}")
 
-            # ── 2. Mood analysis (non-blocking, runs in parallel) ─────────
-            mood_state = await asyncio.to_thread(self.mood.analyze, audio)
+            # ── 2. Mood analysis (zero-latency background update) ─────────
+            mood_state = self.mood.current_mood
+            asyncio.create_task(asyncio.to_thread(self.mood.analyze, audio))
 
             # ── 3. Build prompt (steer-aware) ────────────────────────────
             system_prompt, user_msg = self.arbiter.build_prompt(

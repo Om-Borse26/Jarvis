@@ -103,6 +103,13 @@ class OllamaClient:
         t0 = time.perf_counter()
         first_token = True
 
+        VOICE_OPTIONS = {
+            "num_ctx": 4096,
+            "temperature": 0.6,
+            "top_p": 0.9,
+            "num_predict": 120,
+        }
+
         try:
             in_think_block = False
             async for chunk in await self._client.chat(
@@ -110,12 +117,7 @@ class OllamaClient:
                 messages   = messages,
                 stream     = True,
                 keep_alive = "24h",
-                options    = {
-                    "num_ctx": 4096,
-                    "temperature": 0.6,
-                    "top_p": 0.9,
-                    "num_predict": 150,
-                },
+                options    = VOICE_OPTIONS,
                 think      = False,
             ):
                 if cancel_event and cancel_event.is_set():
@@ -161,19 +163,33 @@ class OllamaClient:
         return "".join(tokens)
 
     async def warm_up(self):
-        """Pre-load fast model into VRAM so TTFT is instantaneous on first query."""
+        """
+        Pre-load fast model into VRAM with exact 4096 context and runner settings.
+        Prevents runner recreation delay on the first user query.
+        """
         try:
-            logger.info(f"Pre-warming LLM '{self._fast_model}' into VRAM...")
+            logger.info(f"Pre-warming LLM '{self._fast_model}' into VRAM with 4096 context...")
             t0 = time.perf_counter()
-            await self._client.chat(
-                model=self._fast_model,
-                messages=[{"role": "user", "content": "ping"}],
-                stream=False,
-                keep_alive="24h",
-                options={"num_predict": 1},
-            )
+            # Stream 1 token through the exact same pipeline configuration
+            async for _ in await self._client.chat(
+                model      = self._fast_model,
+                messages   = [
+                    {"role": "system", "content": "You are Jarvis. Be concise."},
+                    {"role": "user",   "content": "ping"}
+                ],
+                stream     = True,
+                keep_alive = "24h",
+                options    = {
+                    "num_ctx": 4096,
+                    "temperature": 0.6,
+                    "top_p": 0.9,
+                    "num_predict": 2,
+                },
+                think      = False,
+            ):
+                break
             elapsed = (time.perf_counter() - t0) * 1000
-            logger.success(f"LLM '{self._fast_model}' warm and resident in VRAM ({elapsed:.0f}ms).")
+            logger.success(f"LLM '{self._fast_model}' warm, cached, and resident in VRAM ({elapsed:.0f}ms).")
         except Exception as e:
             logger.warning(f"LLM pre-warm notice: {e}")
 
