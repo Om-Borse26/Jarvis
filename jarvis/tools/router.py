@@ -31,8 +31,8 @@ class ToolRouter:
         If not matched, returns None so it flows to the LLM.
         """
         norm_text = SpeechNormalizer.normalize(utterance)
-        text = norm_text.lower().strip().rstrip(".!?")
-        clean_cmd = SpeechNormalizer.clean_command(text).lower()
+        text = re.sub(r"\s+", " ", norm_text.lower().strip().rstrip(".!?"))
+        clean_cmd = re.sub(r"\s+", " ", SpeechNormalizer.clean_command(text).lower())
 
         # ── Audio & Volume Controls ───────────────────────────────────────
         # 1. Absolute volume: "laptop's volume to 90%", "turn volume up to 90", "volume 80"
@@ -45,15 +45,15 @@ class ToolRouter:
                 res = await registry.execute("set_volume", percent=val)
                 return res.get("result", f"Master volume set to {val} percent, Sir.")
 
-        # 2. Relative volume: "can you increase the volume", "turn up volume", "make it louder"
-        if any(k in text or k in clean_cmd for k in (
+        # 2. Relative volume: "can you decrease the system volume", "increase volume", "make it louder"
+        if re.search(r"(?:increase|turn\s+up|raise|boost|make|crank)\s+(?:the\s+)?(?:system\s+|laptop\s+|master\s+)?(?:volume|sound|audio)", text) or any(k in text or k in clean_cmd for k in (
             "increase the volume", "increase volume", "turn up volume", "turn up the volume",
             "volume up", "louder", "make it louder", "make volume louder"
         )):
             res = await registry.execute("change_volume_relative", delta_percent=10)
             return res.get("result", "Volume increased by 10 percent, Sir.")
 
-        if any(k in text or k in clean_cmd for k in (
+        if re.search(r"(?:decrease|turn\s+down|lower|reduce)\s+(?:the\s+)?(?:system\s+|laptop\s+|master\s+)?(?:volume|sound|audio)", text) or any(k in text or k in clean_cmd for k in (
             "decrease the volume", "decrease volume", "turn down volume", "turn down the volume",
             "volume down", "quieter", "make it quieter", "lower the volume", "lower volume"
         )):
@@ -134,6 +134,31 @@ class ToolRouter:
             res = await registry.execute("list_active_apps")
             return res.get("result")
 
+        # ── Filesystem & Explorer Controls ────────────────────────────────
+        # "create a folder called test_folder", "create a folder in vs code", "make a directory new_src"
+        mkdir_match = re.search(r"(?:create|make|add)\s+(?:a\s+)?(?:folder|directory)\s*(?:named|called)?\s*([a-zA-Z0-9_\-\./\\]+)", clean_cmd)
+        if not mkdir_match:
+            mkdir_match = re.search(r"(?:create|make|add)\s+(?:a\s+)?(?:folder|directory)\s*(?:named|called)?\s*([a-zA-Z0-9_\-\./\\]+)", text)
+        if mkdir_match:
+            folder_target = mkdir_match.group(1).strip()
+            # If the user says "create a folder in vs code" without a specific name, create 'new_folder'
+            if folder_target.lower() in ("in", "for", "the", "a", "vscode", "vs"):
+                folder_target = "new_folder"
+            res = await registry.execute("create_directory", path=folder_target)
+            return res.get("result", f"Created folder '{folder_target}', Sir.")
+
+        # "open explorer", "open file explorer", "show in explorer"
+        if any(eq in text for eq in ["open explorer", "open file explorer", "open in explorer", "show in explorer", "open this in explorer"]):
+            res = await registry.execute("open_in_explorer", path=".")
+            return res.get("result", "Opening File Explorer, Sir.")
+
+        # "find file settings.toml", "search for file main.py"
+        find_match = re.search(r"(?:find|search\s+for)\s+(?:file\s+|folder\s+)?([a-zA-Z0-9_\-\.]+\.[a-zA-Z0-9]+)", text)
+        if find_match:
+            fname = find_match.group(1).strip()
+            res = await registry.execute("search_files", query=fname)
+            return res.get("result")
+
         # ── YouTube Channels & Videos ─────────────────────────────────────
         # 1. Video Click / Selection: "open the first video", "play the first video", "click first video", "select the second video"
         vid_click = re.search(r"(?:open|play|click|select|watch)\s+(?:the\s+)?(first|second|third|fourth|1st|2nd|3rd|4th|\d+)\s+video", text)
@@ -157,13 +182,19 @@ class ToolRouter:
             res = await registry.execute("play_youtube_video", query=search_q)
             return res.get("result", f"Playing {search_q} on YouTube, Sir.")
 
-        # 3. Channel searches: "open dreams channel", "open dream channel on youtube", "go to dreams channel"
-        ch_match = re.search(r"(?:open|search|go\s+to|show\s+me)\s+(?:up\s+)?(.+?)\s+(?:channel(?:\s+on\s+youtube)?|on\s+youtube)", text)
+        # 3. Clean channel searches: "search for Yaboy Roshi's youtube channel", "open dreams channel"
+        clean_for_ch = re.sub(r"[?!.,]", " ", text)
+        clean_for_ch = re.sub(r"\s+", " ", clean_for_ch).strip()
+        ch_match = re.search(r"(?:open|search|go\s+to|show\s+me)\s+(?:up\s+)?(.+?)\s+(?:channel(?:\s+on\s+youtube)?|on\s+youtube)", clean_for_ch)
         if ch_match:
-            ch_name = ch_match.group(1).strip()
-            search_target = ch_name if ch_name.endswith("channel") else f"{ch_name} channel"
-            res = await registry.execute("search_youtube", query=search_target)
-            return res.get("result", f"Opening {search_target} on YouTube, Sir.")
+            raw_ch = ch_match.group(1).strip()
+            # Strip inner conversational wrappers: "and search for", "and open", "for"
+            clean_ch = re.sub(r"^(?:(?:and\s+)?(?:search|open|find|go\s+to)\s+(?:for\s+)?|for\s+)+", "", raw_ch, flags=re.IGNORECASE).strip()
+            clean_ch = re.sub(r"['’]s$", "", clean_ch).strip()
+            if clean_ch and len(clean_ch) > 2:
+                search_target = clean_ch if clean_ch.endswith("channel") else f"{clean_ch} channel"
+                res = await registry.execute("search_youtube", query=search_target)
+                return res.get("result", f"Opening {search_target} on YouTube, Sir.")
 
         if text in ("open youtube", "open youtube in brave", "launch youtube", "go to youtube"):
             res = await registry.execute("open_website", url="https://www.youtube.com")

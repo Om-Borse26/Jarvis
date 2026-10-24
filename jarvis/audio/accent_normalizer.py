@@ -17,8 +17,8 @@ HOMOPHONE_MAP = [
     (r"\b(new|incoming|unread|my)\s+(?:male|meal)\b", r"\1 mail"),
     (r"\bwant\s+to\s+compose\s+(?:a\s+)?(?:male|meal)\b", "want to compose a mail"),
 
-    # WhatsApp acoustic variations ("what-up group", "wassup")
-    (r"\b(?:what[\s\-_]*up|what[\s\-_]*app|wassup)\b", "whatsapp"),
+    # WhatsApp acoustic variations ("what-up group", "wassup", "whats app")
+    (r"\b(?:what[\s\-_]*up|wassup|whats[\s\-_]*app|what['’]s[\s\-_]*app)\b", "whatsapp"),
 
     # VS Code / IDE acronyms
     (r"\b(?:v\.s\.|v\.\s*s\.|v\s+s|we\s+s)\s*code\b", "vs code"),
@@ -30,9 +30,6 @@ HOMOPHONE_MAP = [
     # URL / Web slips
     (r"\b(?:the|this)\s+u\.s\.\b", "the URL"),
     (r"\bu\.s\.\s+(?:is|was)\s+(?:wrong|invalid)\b", "URL is wrong"),
-
-    # WhatsApp homophones
-    (r"\b(?:what-up|what\s+up|wassup|wat\s*app|whats\s*app)\b", "whatsapp"),
 
     # Assistant name variations
     (r"\b(?:jarvvis|javis|jarves|jarviz|jarvus)\b", "jarvis"),

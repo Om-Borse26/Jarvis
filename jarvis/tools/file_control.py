@@ -149,3 +149,42 @@ def open_in_explorer(path: str = "") -> str:
         return f"Opened {target} in File Explorer."
     except Exception as e:
         return f"Failed to open explorer: {e}"
+
+
+@register_tool(
+    name="create_directory",
+    description="Create a new folder or directory on disk (e.g. 'new_folder', 'src/components').",
+    category="filesystem"
+)
+def create_directory(path: str) -> str:
+    """Create a new folder on disk."""
+    clean_p = path.strip('"').strip("'").strip()
+    if not clean_p:
+        return "Please specify a folder name or path to create."
+    try:
+        target = Path(clean_p)
+        target.mkdir(parents=True, exist_ok=True)
+        return f"Created folder '{clean_p}' at {target.resolve()}, Sir."
+    except Exception as e:
+        return f"Failed to create folder '{clean_p}': {e}"
+
+
+@register_tool(
+    name="delete_file",
+    description="Delete a file from disk.",
+    category="filesystem"
+)
+def delete_file(file_path: str) -> str:
+    """Delete a specified file from disk."""
+    clean_p = file_path.strip('"').strip("'").strip()
+    try:
+        p = Path(clean_p)
+        if not p.exists():
+            return f"File '{clean_p}' does not exist."
+        if p.is_dir():
+            return f"'{clean_p}' is a directory, not a file."
+        p.unlink()
+        return f"Deleted file '{clean_p}', Sir."
+    except Exception as e:
+        return f"Failed to delete file '{clean_p}': {e}"
+

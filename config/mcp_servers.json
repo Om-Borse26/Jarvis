@@ -2,28 +2,52 @@
   "mcpServers": {
     "playwright": {
       "command": "npx",
-      "args": ["-y", "@playwright/mcp@latest"],
+      "args": [
+        "-y",
+        "@playwright/mcp@latest"
+      ],
       "description": "Full headless/headful browser automation, DOM inspection, and web scraping"
     },
     "tavily": {
       "command": "npx",
-      "args": ["-y", "tavily-mcp"],
+      "args": [
+        "-y",
+        "tavily-mcp"
+      ],
       "description": "Real-time web search, news aggregation, and live external intelligence"
     },
     "context7": {
       "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp"],
+      "args": [
+        "-y",
+        "@upstash/context7-mcp"
+      ],
       "description": "Codebase indexing, semantic code intelligence, and symbol lookup"
     },
     "codebase-memory": {
       "command": "npx",
-      "args": ["-y", "codebase-memory-mcp", "serve"],
+      "args": [
+        "-y",
+        "codebase-memory-mcp",
+        "serve"
+      ],
       "description": "Project architecture understanding and long-term codebase memory"
     },
     "memory": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ],
       "description": "Graph-based persistent personal entity and relationship memory"
+    },
+    "stitch": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@stitch/mcp"
+      ],
+      "description": "Stitch MCP integration for AI assistance"
     }
   }
 }
