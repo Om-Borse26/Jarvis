@@ -41,12 +41,12 @@ language        = "en"
 engine          = "kokoro"     # kokoro | piper
 model_path      = "models/kokoro"
 voice           = "bm_george"  # Kokoro British male voice — iconic Jarvis persona
-speed           = 1.0          # 0.8–1.3 range
+speed           = 1.15         # 1.15 = snappy, articulate, natural British delivery
 device          = "cpu"        # kokoro runs well on CPU; frees GPU for LLM
 
 [llm]
 # ── Model routing thresholds ──────────────────────────────────
-fast_model      = "qwen3.5:4b"              # Always-resident in VRAM
+fast_model      = "qwen2.5-coder:7b"        # Always-resident in VRAM (instant TTFT, no thinking delay)
 code_model      = "qwen2.5-coder:7b"        # Coding, scripting, MCP generation
 deep_model      = "gemma4:latest"            # Complex reasoning, screen vision
 long_ctx_model  = "qwen3.5-32k:latest"      # When context > 8K tokens

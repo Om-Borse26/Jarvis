@@ -93,9 +93,12 @@ class JarvisPipeline:
         if not healthy:
             logger.error(
                 "Ollama is not running or fast model is not available.\n"
-                "Please start Ollama and ensure 'qwen3.5:4b' is pulled."
+                f"Please start Ollama and ensure '{self.llm._fast_model}' is pulled."
             )
             raise RuntimeError("Ollama not available.")
+
+        # Pre-warm fast model in GPU VRAM for instant < 200ms response
+        await self.llm.warm_up()
 
         # 2. Load STT model
         logger.info("Loading STT model...")
@@ -116,11 +119,12 @@ class JarvisPipeline:
         self._running = True
         logger.success("✅ Jarvis is online and listening.")
 
-        # Greeting
+        # Greeting (pronounce Jarvis naturally as a single word)
+        hotkey_str = "+".join(self._cfg.get("hotkey", {}).get("trigger_keys", ["win", "j"]))
         await self._speak_async(
             f"Good {self._time_of_day()}, {self._user_name}. "
-            f"J.A.R.V.I.S. online. "
-            f"Wake word and {'+'.join(self._cfg['hotkey']['trigger_keys'])} hotkey are both active."
+            f"Jarvis is online and ready. "
+            f"Wake word and {hotkey_str} hotkey are active."
         )
 
         # 6. Main event loop — keeps process alive
@@ -148,9 +152,10 @@ class JarvisPipeline:
             logger.info("🛑 Hotkey pressed during speech — interrupting playback.")
             self.tts.interrupt()
             self._cancel_llm.set()
-        logger.info("🎙️ Listening armed (Hotkey Win+J). Speak now...")
+
         self._listening = True
         self._listening_timestamp = time.time()
+        logger.info("🎙️ Listening armed via hotkey (Win+J). Jarvis is listening for 15s...")
 
     def _on_wake_mode_changed(self, enabled: bool):
         """Spoken notification when wake word is toggled live via Win+Shift+J."""
@@ -192,28 +197,35 @@ class JarvisPipeline:
                 return
 
             now = time.time()
-            is_armed = self._listening and (now - self._listening_timestamp < 8.0)
-            self._listening = False
+            # Active listening window: 15 seconds after hotkey, wake response, or follow-up
+            is_armed = self._listening and (now - self._listening_timestamp < 15.0)
 
-            # Check trigger conditions: armed by hotkey OR explicit wake phrase
+            # Check trigger conditions: armed by hotkey/follow-up OR explicit wake phrase
             if is_armed:
                 text = self.trigger.strip_wake_word(text)
             else:
                 if self.trigger.wake_word_enabled and self.trigger.is_wake_word(text):
                     logger.success(f"🎙️  Wake word recognized in: '{text}'")
-                    text = self.trigger.strip_wake_word(text)
-                    if not text or len(text.strip()) < 2:
+                    command_text = self.trigger.strip_wake_word(text).strip()
+                    if not command_text or len(command_text) < 2:
+                        # User said ONLY the wake word (e.g. "Hey Jarvis")
                         await self._speak_async(f"At your service, {self._user_name}.")
                         self._listening = True
                         self._listening_timestamp = time.time()
+                        logger.info(f"🎙️ Jarvis active for 15s. Awaiting your command, {self._user_name}...")
                         return
+                    else:
+                        # User said wake word + command together
+                        text = command_text
                 else:
-                    logger.debug(f"Ambient speech ignored: '{text}'")
+                    logger.debug(f"Ambient speech ignored (standby mode): '{text}'")
                     return
 
             if not text.strip():
                 return
 
+            # Consume the active armed token for this command
+            self._listening = False
             logger.info(f"👤 User: {text}")
 
             # ── 2. Mood analysis (non-blocking, runs in parallel) ─────────
@@ -234,7 +246,7 @@ class JarvisPipeline:
             response_buffer = []
 
             async def stream_to_tts():
-                """Stream tokens and speak in sentence chunks."""
+                """Stream tokens and speak in natural sentence chunks."""
                 pending = ""
                 async for token in self.llm.stream(
                     system_prompt = system_prompt,
@@ -247,19 +259,27 @@ class JarvisPipeline:
 
                     # Speak sentence-by-sentence as tokens arrive
                     if any(pending.rstrip().endswith(p) for p in [".", "!", "?"]):
-                        sentence = pending.strip()
-                        pending  = ""
-                        if sentence:
-                            logger.debug(f"🤖 Jarvis: {sentence}")
-                            await asyncio.to_thread(
-                                self.tts.speak, sentence, False
-                            )
+                        clean_candidate = pending.strip()
+                        # Avoid splitting on common abbreviations
+                        if len(clean_candidate) >= 15 and not clean_candidate.endswith(("Mr.", "Dr.", "e.g.", "vs.", "i.e.")):
+                            sentence = clean_candidate
+                            pending  = ""
+                            if sentence:
+                                logger.debug(f"🤖 Jarvis: {sentence}")
+                                await asyncio.to_thread(
+                                    self.tts.speak, sentence, False
+                                )
 
                 # Speak any remaining fragment
                 if pending.strip() and not self._cancel_llm.is_set():
                     await asyncio.to_thread(self.tts.speak, pending.strip(), False)
 
             await stream_to_tts()
+
+            # Keep listening open for 10 seconds for seamless conversational follow-ups
+            self._listening = True
+            self._listening_timestamp = time.time()
+            logger.debug("🎙️ Conversation window open (10s follow-up)...")
 
             # ── 5. Update conversation history ───────────────────────────
             if response_buffer:

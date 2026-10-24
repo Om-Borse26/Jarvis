@@ -106,11 +106,17 @@ class OllamaClient:
         try:
             in_think_block = False
             async for chunk in await self._client.chat(
-                model    = model,
-                messages = messages,
-                stream   = True,
-                options  = {"num_ctx": 4096},
-                think    = False,
+                model      = model,
+                messages   = messages,
+                stream     = True,
+                keep_alive = "24h",
+                options    = {
+                    "num_ctx": 4096,
+                    "temperature": 0.6,
+                    "top_p": 0.9,
+                    "num_predict": 150,
+                },
+                think      = False,
             ):
                 if cancel_event and cancel_event.is_set():
                     logger.debug("LLM stream cancelled.")
@@ -154,12 +160,47 @@ class OllamaClient:
             tokens.append(token)
         return "".join(tokens)
 
+    async def warm_up(self):
+        """Pre-load fast model into VRAM so TTFT is instantaneous on first query."""
+        try:
+            logger.info(f"Pre-warming LLM '{self._fast_model}' into VRAM...")
+            t0 = time.perf_counter()
+            await self._client.chat(
+                model=self._fast_model,
+                messages=[{"role": "user", "content": "ping"}],
+                stream=False,
+                keep_alive="24h",
+                options={"num_predict": 1},
+            )
+            elapsed = (time.perf_counter() - t0) * 1000
+            logger.success(f"LLM '{self._fast_model}' warm and resident in VRAM ({elapsed:.0f}ms).")
+        except Exception as e:
+            logger.warning(f"LLM pre-warm notice: {e}")
+
     async def check_health(self) -> bool:
         """Check if Ollama server is reachable and fast model is available."""
         try:
-            models = await self._client.list()
-            available = [m["model"] for m in models.get("models", [])]
-            if self._fast_model not in available:
+            models_resp = await self._client.list()
+            # Handle both pydantic object and dict responses
+            if hasattr(models_resp, "models"):
+                raw_list = models_resp.models
+            elif isinstance(models_resp, dict):
+                raw_list = models_resp.get("models", [])
+            else:
+                raw_list = []
+
+            available = []
+            for m in raw_list:
+                if hasattr(m, "model"):
+                    available.append(m.model)
+                elif isinstance(m, dict):
+                    available.append(m.get("model", ""))
+
+            # Match model name with or without tag
+            fast_base = self._fast_model.split(":")[0]
+            matched = any(self._fast_model in m or fast_base in m for m in available)
+
+            if not matched:
                 logger.warning(
                     f"Fast model '{self._fast_model}' not found in Ollama. "
                     f"Available: {available}"

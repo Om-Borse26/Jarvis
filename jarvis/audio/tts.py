@@ -12,11 +12,76 @@ import time
 from pathlib import Path
 from typing import Optional, Callable
 
+import re
 import numpy as np
 import sounddevice as sd
 from loguru import logger
 
 from jarvis.core.config import load_config
+
+
+def clean_text_for_speech(text: str) -> str:
+    """
+    Sanitize text before TTS synthesis so symbols, markdown, and acronyms
+    are never vocalized awkwardly.
+
+    Guarantees:
+      - 'J.A.R.V.I.S.' / 'JARVIS' -> 'Jarvis' (single natural word)
+      - Strips all asterisks (*, **), hashes (#), bullet points (-, •)
+      - Strips code blocks, backticks, emojis, and HTML/XML tags
+      - Expands '&' to 'and', '%' to 'percent', '+' to 'plus'
+      - Preserves natural sentence punctuation (., !, ?) for human-like cadence
+    """
+    if not text:
+        return ""
+
+    # Strip XML / HTML tags (e.g. <think>...</think>)
+    text = re.sub(r"<[^>]+>", " ", text)
+
+    # Convert J.A.R.V.I.S. variants to single natural word Jarvis
+    text = re.sub(r"\bJ\.?A\.?R\.?V\.?I\.?S\.?", "Jarvis", text, flags=re.IGNORECASE)
+
+    # Remove markdown link syntax [title](url) -> title
+    text = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", text)
+
+    # Remove code fences and backticks
+    text = re.sub(r"```[a-zA-Z]*\n?", " ", text)
+    text = text.replace("```", " ").replace("`", " ")
+
+    # Remove markdown headers (#, ##, etc.)
+    text = re.sub(r"(?m)^\s*#{1,6}\s*", "", text)
+    text = re.sub(r"#{1,6}\s*", "", text)
+
+    # Remove bullet markers at the start of a line (*, -, +, •)
+    text = re.sub(r"(?m)^\s*[\*\-\+\•]\s*", "", text)
+    # Bullet points inside text -> replace with comma pause
+    text = re.sub(r"\s+[\*\-\+\•]\s+", ", ", text)
+
+    # Strip all remaining asterisks, underscores, and tildes
+    text = text.replace("*", "").replace("_", " ").replace("~", " ")
+
+    # Expand spoken symbols
+    text = text.replace("&", " and ")
+    text = text.replace("%", " percent ")
+    text = text.replace("@", " at ")
+    text = text.replace("=", " equals ")
+    text = text.replace("+", " plus ")
+
+    # Strip other raw symbols that TTS engines vocalize awkwardly
+    text = re.sub(r"[\/\\\|\<\>\{\}\[\]\^\~]", " ", text)
+
+    # Strip emojis
+    text = re.sub(r"[\U00010000-\U0010ffff]", "", text)
+
+    # Normalize whitespace
+    text = re.sub(r"\s+", " ", text).strip()
+
+    # Clean up awkward punctuation spacing
+    text = re.sub(r"\s+([,\.!\?:])", r"\1", text)
+    text = text.replace(":,", ": ").replace(",,", ",")
+    text = re.sub(r"([,\.!\?]){2,}", r"\1", text)
+
+    return text.strip()
 
 
 class TTSEngine:
@@ -32,8 +97,8 @@ class TTSEngine:
     def __init__(self):
         self._cfg         = load_config()["tts"]
         self._tts         = None
-        self._voice       = self._cfg["voice"]
-        self._speed       = self._cfg["speed"]
+        self._voice       = self._cfg.get("voice", "bm_george")
+        self._speed       = float(self._cfg.get("speed", 1.15))
         self._model_path  = self._cfg["model_path"]
 
         cfg_audio         = load_config()["audio"]
@@ -75,7 +140,8 @@ class TTSEngine:
             sentence_chunks:  If True, synthesizes sentence-by-sentence for
                               lower latency to first audio byte.
         """
-        if not text.strip():
+        text = clean_text_for_speech(text)
+        if not text:
             return
 
         self._cancel_event.clear()
@@ -115,10 +181,10 @@ class TTSEngine:
 
     def _speak_chunked(self, text: str):
         """Split text at sentence boundaries and stream each chunk."""
-        import re
         # Split on sentence endings but keep delimiter
         sentences = re.split(r'(?<=[.!?])\s+', text)
-        sentences = [s.strip() for s in sentences if s.strip()]
+        sentences = [clean_text_for_speech(s) for s in sentences]
+        sentences = [s for s in sentences if s]
 
         remaining = list(sentences)
         for sentence in sentences:
@@ -141,9 +207,13 @@ class TTSEngine:
 
     def _synthesize_and_play(self, text: str):
         """Synthesize one chunk and play it to the speaker."""
+        clean = clean_text_for_speech(text)
+        if not clean:
+            return
+
         t0 = time.perf_counter()
         samples, sample_rate = self._tts.create(
-            text,
+            clean,
             voice=self._voice,
             speed=self._speed,
             lang="en-us",
