@@ -141,15 +141,76 @@ class Scheduler:
             )
             """
         )
+        # Migrate older DBs: importance + event time (for meetings) columns.
+        for col, ddl in (("importance", "TEXT DEFAULT 'normal'"), ("event_at", "REAL")):
+            try:
+                con.execute(f"ALTER TABLE jobs ADD COLUMN {col} {ddl}")
+            except Exception:
+                pass
         con.commit()
         con.close()
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
     def start(self) -> None:
         import asyncio
+        self.reconcile_missed()
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._tick_loop(), name="scheduler")
             logger.info("[Scheduler] Firing loop started.")
+
+    def reconcile_missed(self) -> None:
+        """
+        At startup, decide what to do with jobs that came due while Jarvis was off:
+          - recurring: fast-forward to the next future slot (don't replay old ones)
+          - once + important/critical and still relevant: let it surface now
+          - everything else: skip it and hand it off to Eve for the phone
+        """
+        now = time.time()
+        try:
+            con = sqlite3.connect(self.db_path)
+            rows = con.execute(
+                "SELECT id, kind, text, fire_at, interval, importance, event_at "
+                "FROM jobs WHERE active = 1 AND fire_at <= ?",
+                (now,),
+            ).fetchall()
+            con.close()
+        except Exception as e:
+            logger.debug(f"[Scheduler] reconcile read failed: {e}")
+            return
+
+        for jid, kind, text, fire_at, interval, importance, event_at in rows:
+            if kind == "recurring" and interval:
+                nxt = fire_at
+                while nxt <= now:
+                    nxt += interval
+                self._reschedule(jid, nxt)
+                continue
+            if self._is_relevant(importance or "normal", fire_at, event_at, now):
+                continue  # leave active → fires on the first tick
+            self._deactivate(jid)
+            self._handoff_to_eve(text, importance or "normal", fire_at, event_at)
+
+    @staticmethod
+    def _is_relevant(importance: str, fire_at: float, event_at: Optional[float], now: float) -> bool:
+        """Should a missed one-shot job still surface on startup?"""
+        if event_at:  # a meeting — only matters if the meeting hasn't happened yet
+            return event_at > now
+        if importance == "critical":
+            return (now - fire_at) < 24 * 3600
+        if importance == "important":
+            return (now - fire_at) < 2 * 3600
+        return False  # normal reminders never replay after a miss
+
+    def _handoff_to_eve(self, text: str, importance: str, fire_at: float, event_at: Optional[float]) -> None:
+        try:
+            from jarvis.memory.shared_bus import shared_bus
+            shared_bus.push_event(
+                "missed_reminder",
+                {"text": text, "importance": importance, "due": fire_at, "event_at": event_at},
+                target="eve",
+            )
+        except Exception as e:
+            logger.debug(f"[Scheduler] Eve handoff failed: {e}")
 
     def stop(self) -> None:
         if self._task and not self._task.done():
@@ -205,11 +266,15 @@ class Scheduler:
         con.close()
 
     # ── CRUD ──────────────────────────────────────────────────────────────────
-    def add_job(self, kind: str, text: str, fire_at: float, interval: Optional[float], action: str = "speak") -> int:
+    def add_job(
+        self, kind: str, text: str, fire_at: float, interval: Optional[float],
+        action: str = "speak", importance: str = "normal", event_at: Optional[float] = None,
+    ) -> int:
         con = sqlite3.connect(self.db_path)
         cur = con.execute(
-            "INSERT INTO jobs (kind, action, text, fire_at, interval, active, created) VALUES (?, ?, ?, ?, ?, 1, ?)",
-            (kind, action, text, fire_at, interval, time.time()),
+            "INSERT INTO jobs (kind, action, text, fire_at, interval, active, created, importance, event_at) "
+            "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)",
+            (kind, action, text, fire_at, interval, time.time(), importance, event_at),
         )
         con.commit()
         jid = cur.lastrowid
@@ -219,11 +284,12 @@ class Scheduler:
     def list_jobs(self) -> List[Dict[str, Any]]:
         con = sqlite3.connect(self.db_path)
         rows = con.execute(
-            "SELECT id, kind, action, text, fire_at, interval FROM jobs WHERE active = 1 ORDER BY fire_at"
+            "SELECT id, kind, action, text, fire_at, interval, importance FROM jobs WHERE active = 1 ORDER BY fire_at"
         ).fetchall()
         con.close()
         return [
-            {"id": r[0], "kind": r[1], "action": r[2], "text": r[3], "fire_at": r[4], "interval": r[5]}
+            {"id": r[0], "kind": r[1], "action": r[2], "text": r[3],
+             "fire_at": r[4], "interval": r[5], "importance": r[6]}
             for r in rows
         ]
 
@@ -258,16 +324,40 @@ def _fmt_eta(fire_at: float) -> str:
 
 @register_tool(
     name="set_reminder",
-    description="Set a one-time reminder. `when` accepts phrases like 'in 10 minutes', 'in 2 hours', 'at 3pm', 'tomorrow at 9am'. Jarvis will speak the reminder when it's due.",
+    description="Set a one-time reminder. `when` accepts 'in 10 minutes', 'in 2 hours', 'at 3pm', 'tomorrow at 9am'. `importance` can be 'normal', 'important', or 'critical' — only important/critical reminders resurface if they were missed while the PC was off (normal ones are handed to Eve instead).",
     category="scheduler",
 )
-def set_reminder(text: str, when: str) -> str:
+def set_reminder(text: str, when: str, importance: str = "normal") -> str:
     """Schedule a one-shot spoken reminder."""
     parsed = parse_when(when)
     if not parsed:
         return f"I couldn't understand the time '{when}'. Try 'in 10 minutes' or 'at 3pm'."
-    jid = scheduler.add_job("once", text, parsed["fire_at"], None, action="speak")
+    imp = importance.lower() if importance.lower() in ("normal", "important", "critical") else "normal"
+    jid = scheduler.add_job("once", text, parsed["fire_at"], None, action="speak", importance=imp)
     return f"Reminder set ({jid}). I'll remind you {_fmt_eta(parsed['fire_at'])}."
+
+
+@register_tool(
+    name="schedule_meeting",
+    description="Schedule a meeting reminder. `when` is the meeting time ('at 3pm', 'tomorrow at 10am'). Jarvis reminds you `lead_minutes` before (default 15). If the PC is off at that time, it's handed to Eve for your phone.",
+    category="scheduler",
+)
+def schedule_meeting(title: str, when: str, lead_minutes: int = 15) -> str:
+    """Schedule a meeting with a lead-time reminder."""
+    parsed = parse_when(when)
+    if not parsed:
+        return f"I couldn't understand the meeting time '{when}'. Try 'at 3pm' or 'tomorrow at 10am'."
+    event_at = parsed["fire_at"]
+    lead = max(1, int(lead_minutes)) * 60
+    fire_at = event_at - lead
+    if fire_at <= time.time():
+        fire_at = time.time() + 30  # meeting is imminent — remind right away
+    jid = scheduler.add_job(
+        "once", f"Meeting: {title}", fire_at, None,
+        action="speak", importance="important", event_at=event_at,
+    )
+    event_str = datetime.datetime.fromtimestamp(event_at).strftime("%H:%M")
+    return f"Meeting '{title}' scheduled ({jid}). I'll remind you {lead_minutes} minutes before, around {_fmt_eta(fire_at)} (meeting at {event_str})."
 
 
 @register_tool(

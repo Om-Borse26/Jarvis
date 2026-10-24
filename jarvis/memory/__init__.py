@@ -10,5 +10,6 @@ jarvis/core/memory.py.)
 from jarvis.memory.working import working_memory
 from jarvis.memory.episodic import episodic_memory  # noqa: F401 (registers recall tool)
 from jarvis.memory.semantic import semantic_memory
+from jarvis.memory.shared_bus import shared_bus  # noqa: F401 (registers Eve bus tools)
 
-__all__ = ["working_memory", "episodic_memory", "semantic_memory"]
+__all__ = ["working_memory", "episodic_memory", "semantic_memory", "shared_bus"]

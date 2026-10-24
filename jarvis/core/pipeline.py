@@ -163,6 +163,9 @@ class JarvisPipeline:
             f"Wake word and {hotkey_str} hotkey are active."
         )
 
+        # Surface anything Eve queued from the phone while you were away.
+        await self._announce_eve_handoffs()
+
         # 6. Main event loop — keeps process alive
         try:
             while self._running:
@@ -522,6 +525,21 @@ class JarvisPipeline:
             await mcp_manager.start_all(only=autostart)
         except Exception as e:
             logger.warning(f"[MCP] Startup notice: {e}")
+
+    async def _announce_eve_handoffs(self):
+        """Speak any tasks/notes Eve queued from the phone, then acknowledge them."""
+        try:
+            from jarvis.memory.shared_bus import shared_bus
+            items = shared_bus.pending(target="jarvis", limit=5)
+            texts = [i["payload"].get("text", "") for i in items if i["payload"].get("text")]
+            if texts:
+                await self._speak_async(
+                    f"While you were away, Eve noted: {'; '.join(texts)}."
+                )
+            for i in items:
+                shared_bus.ack(i["id"])
+        except Exception as e:
+            logger.debug(f"Eve handoff announce skipped: {e}")
 
     async def _run_scheduled_command(self, text: str):
         """Execute a scheduled 'do' task through the agent loop and speak the result."""
