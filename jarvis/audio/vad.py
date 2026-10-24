@@ -65,9 +65,13 @@ class VADListener:
         self._model_state    = None
         self._last_speaker_active_time = 0.0
 
-        # ── Barge-in support ─────────────────────────────────────────────
+        # ── Barge-in & Echo Suppression ──────────────────────────────────
         self._barge_in_enabled = False
         self._on_barge_in: Optional[Callable] = None
+        self._speaker_started_time = 0.0
+        self._last_barge_in_time = 0.0
+        self._consecutive_barge_chunks = 0
+        self._was_speaking = False
 
     # ──────────────────────────────────────────────────────────────────
     # Lifecycle
@@ -156,24 +160,47 @@ class VADListener:
                 now = time.time()
                 is_speaking = bool(self._is_speaking_fn and self._is_speaking_fn())
                 if is_speaking:
+                    if not self._was_speaking:
+                        self._speaker_started_time = now
+                        self._consecutive_barge_chunks = 0
+                    self._was_speaking = True
                     self._last_speaker_active_time = now
-                    # Check for voice barge-in if enabled
-                    if self._barge_in_enabled and self._on_barge_in:
+
+                    # Grace period: do NOT trigger barge-in during the first 600ms of any utterance.
+                    # Cooldown: enforce 1.5s between consecutive barge-in triggers to prevent self-interruption loops.
+                    time_speaking = now - self._speaker_started_time
+                    time_since_last_barge = now - self._last_barge_in_time
+
+                    if self._barge_in_enabled and self._on_barge_in and time_speaking >= 0.6 and time_since_last_barge >= 1.5:
                         tensor = torch.from_numpy(audio)
                         prob = self._model(tensor, self.SAMPLE_RATE).item()
                         rms = float(np.sqrt(np.mean(audio ** 2)))
-                        # Voice barge-in: intentional user speech near mic over speaker sound
-                        if prob >= 0.85 and rms >= 0.045:
-                            logger.info(f"🛑 Voice barge-in detected (prob={prob:.2f}, rms={rms:.3f})! Halting speech...")
-                            self._on_barge_in()
+
+                        # Genuine user voice interruption: sustained loud speech (>= 0.14 RMS over speaker bleed)
+                        # across at least 3 consecutive chunks (~100ms)
+                        if prob >= 0.90 and rms >= 0.14:
+                            self._consecutive_barge_chunks += 1
+                            if self._consecutive_barge_chunks >= 3:
+                                logger.info(f"🛑 Voice barge-in detected (prob={prob:.2f}, rms={rms:.3f})! Halting speech...")
+                                self._last_barge_in_time = now
+                                self._consecutive_barge_chunks = 0
+                                self._on_barge_in()
+                        else:
+                            self._consecutive_barge_chunks = 0
+                    else:
+                        self._consecutive_barge_chunks = 0
+
                     in_speech = False
                     speech_chunks = []
                     silence_chunks = 0
                     pre_buf.clear()
                     continue
 
-                if (now - self._last_speaker_active_time) < 0.15:
-                    # Dissipate room acoustic echo (150ms)
+                self._was_speaking = False
+                self._consecutive_barge_chunks = 0
+
+                if (now - self._last_speaker_active_time) < 0.25:
+                    # Dissipate room acoustic echo (250ms)
                     in_speech = False
                     speech_chunks = []
                     silence_chunks = 0

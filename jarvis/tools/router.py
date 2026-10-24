@@ -89,13 +89,51 @@ class ToolRouter:
             res = await registry.execute("list_active_apps")
             return res.get("result")
 
+        # ── YouTube & Web Searches ────────────────────────────────────────
+        if text in ("open youtube", "open youtube in brave", "launch youtube", "go to youtube"):
+            res = await registry.execute("open_website", url="https://www.youtube.com")
+            return "Opening YouTube, Sir."
+
+        yt_patterns = [
+            r"(?:search\s+youtube\s+(?:for\s+)?)(.+)",
+            r"(?:search\s+(?:for\s+)?)(.+?)(?:\s+on\s+youtube)",
+            r"(?:open\s+(?:up\s+)?)(.+?)(?:\s+(?:on\s+youtube|videos))",
+            r"(?:play\s+)(.+?)(?:\s+on\s+youtube)",
+            r"(?:i\s+want(?:ed)?\s+to\s+see\s+(?:some\s+)?)(.+?)(?:\s+videos|\s+on\s+youtube)",
+            r"(?:can\s+you\s+open\s+(?:up\s+)?)(.+?)(?:\s+videos|\s+on\s+youtube)",
+            r"(?:show\s+(?:me\s+)?)(.+?)(?:\s+on\s+youtube|\s+videos)",
+            r"^open\s+(?:up\s+)?(.+?)\s+videos$",
+        ]
+        for pattern in yt_patterns:
+            m = re.search(pattern, text)
+            if m:
+                query = m.group(1).strip()
+                query = re.sub(r"^(?:some|a|the)\s+", "", query).strip()
+                if query:
+                    search_q = f"{query} videos" if not query.endswith("videos") else query
+                    res = await registry.execute("search_youtube", query=search_q)
+                    return res.get("result", f"Opening {search_q} on YouTube, Sir.")
+
+        web_patterns = [
+            r"(?:search\s+(?:google|web|the\s+web)\s+(?:for\s+)?)(.+)",
+            r"(?:search\s+(?:for\s+)?)(.+?)(?:\s+on\s+google|\s+on\s+the\s+web)",
+            r"(?:google\s+)(.+)",
+        ]
+        for pattern in web_patterns:
+            m = re.search(pattern, text)
+            if m:
+                query = m.group(1).strip()
+                if query:
+                    res = await registry.execute("search_web", query=query)
+                    return res.get("result", f"Searching web for {query}, Sir.")
+
         # ── Process Launching & Killing ───────────────────────────────────
         # "open brave", "launch blender", "start discord", "open calculator"
         launch_match = re.match(r"^(?:open|launch|start)\s+([a-zA-Z0-9_\-\.\s]+)$", text)
         if launch_match:
             app_target = launch_match.group(1).strip()
             # Avoid matching general phrases like "open website" or "open file"
-            if not app_target.startswith(("website", "url", "file", "folder", "directory")):
+            if not app_target.startswith(("website", "url", "file", "folder", "directory", "youtube", "google")):
                 res = await registry.execute("launch_application", app_name=app_target)
                 return res.get("result", f"Opening {app_target}, Sir.")
 
