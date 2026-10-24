@@ -53,6 +53,7 @@ class JarvisPipeline:
         self.trigger = TriggerSystem(on_trigger=self._on_trigger_fired)
 
         # ── State ────────────────────────────────────────────────────────
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._listening       = False     # True when actively recording user speech
         self._cancel_llm      = asyncio.Event()
         self._conversation_history: list  = []
@@ -77,6 +78,7 @@ class JarvisPipeline:
 
     async def start(self):
         """Full startup sequence — call this from main.py."""
+        self._loop = asyncio.get_running_loop()
         logger.info("=" * 60)
         logger.info("  J.A.R.V.I.S. — Starting up...")
         logger.info("=" * 60)
@@ -150,10 +152,11 @@ class JarvisPipeline:
         if not self._listening and not self.tts.is_speaking:
             return   # Segment captured but we're not in an active session
         # Run in the event loop from the background thread
-        asyncio.run_coroutine_threadsafe(
-            self._process_speech(audio),
-            asyncio.get_event_loop(),
-        )
+        if self._loop and self._loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                self._process_speech(audio),
+                self._loop,
+            )
 
     def _on_barge_in(self):
         """Called by VAD when voice is detected during TTS playback."""
