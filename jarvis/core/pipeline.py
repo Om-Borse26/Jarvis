@@ -38,6 +38,7 @@ from jarvis.audio.speaker_id import speaker_id
 import jarvis.tools  # Automatically registers all tools & plugins
 from jarvis.tools.registry import registry
 from jarvis.tools.router   import ToolRouter
+from jarvis.audio.accent_normalizer import SpeechNormalizer
 
 
 class JarvisPipeline:
@@ -250,6 +251,8 @@ class JarvisPipeline:
             if not text or not text.strip():
                 return
 
+            text = SpeechNormalizer.normalize(text)
+
             now = time.time()
             # Active listening window: 15 seconds after hotkey, wake response, or follow-up
             is_armed = self._listening and (now - self._listening_timestamp < 15.0)
@@ -362,6 +365,16 @@ class JarvisPipeline:
             asyncio.create_task(asyncio.to_thread(self.mood.analyze, audio))
 
             # ── 3. Build prompt (steer-aware + tools schema) ──────────────
+            try:
+                import win32gui
+                hwnd = win32gui.GetForegroundWindow()
+                if hwnd:
+                    fg_title = win32gui.GetWindowText(hwnd)
+                    if fg_title and fg_title.strip():
+                        self._active_app = fg_title.strip()
+            except Exception:
+                pass
+
             system_prompt, user_msg = self.arbiter.build_prompt(
                 new_user_input = text,
                 user_name      = self._user_name,

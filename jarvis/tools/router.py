@@ -15,6 +15,9 @@ from loguru import logger
 from jarvis.tools.registry import registry
 
 
+from jarvis.audio.accent_normalizer import SpeechNormalizer
+
+
 class ToolRouter:
     """Dispatches user intents directly or via LLM tool definitions."""
 
@@ -27,11 +30,12 @@ class ToolRouter:
         If matched, executes the tool instantly (< 1ms) and returns a spoken response.
         If not matched, returns None so it flows to the LLM.
         """
-        text = utterance.lower().strip().rstrip(".!?")
+        norm_text = SpeechNormalizer.normalize(utterance)
+        text = norm_text.lower().strip().rstrip(".!?")
+        clean_cmd = SpeechNormalizer.clean_command(text).lower()
 
         # ── Audio & Volume Controls ───────────────────────────────────────
-        # Matches: "increase volume to 90%", "laptop's volume to 90%", "turn volume up to 90",
-        # "set sound to 90", "make volume 90", "volume 90", "sound 80 percent"
+        # 1. Absolute volume: "laptop's volume to 90%", "turn volume up to 90", "volume 80"
         vol_match = re.search(r"(?:volume|sound|audio|laptop.*?volume).*?(\d{1,3})\s*(?:%|percent)?", text)
         if not vol_match:
             vol_match = re.search(r"(?:increase|decrease|turn|make|set|put).*?(?:to|at)\s+(\d{1,3})\s*(?:%|percent)?", text)
@@ -40,6 +44,21 @@ class ToolRouter:
             if 0 <= val <= 100:
                 res = await registry.execute("set_volume", percent=val)
                 return res.get("result", f"Master volume set to {val} percent, Sir.")
+
+        # 2. Relative volume: "can you increase the volume", "turn up volume", "make it louder"
+        if any(k in text or k in clean_cmd for k in (
+            "increase the volume", "increase volume", "turn up volume", "turn up the volume",
+            "volume up", "louder", "make it louder", "make volume louder"
+        )):
+            res = await registry.execute("change_volume_relative", delta_percent=10)
+            return res.get("result", "Volume increased by 10 percent, Sir.")
+
+        if any(k in text or k in clean_cmd for k in (
+            "decrease the volume", "decrease volume", "turn down volume", "turn down the volume",
+            "volume down", "quieter", "make it quieter", "lower the volume", "lower volume"
+        )):
+            res = await registry.execute("change_volume_relative", delta_percent=-10)
+            return res.get("result", "Volume decreased by 10 percent, Sir.")
 
         if text in ("mute", "mute audio", "mute volume", "mute the sound"):
             res = await registry.execute("mute_volume")
@@ -52,6 +71,28 @@ class ToolRouter:
         if text in ("get volume", "what is the volume", "what's the volume", "check volume"):
             res = await registry.execute("get_volume")
             return res.get("result")
+
+        # ── Active Application & Workspace Context ────────────────────────
+        active_app_queries = [
+            "which application am i in", "in which application i am currently",
+            "which application i am currently", "in which application am i",
+            "what app am i using", "what window is active", "what application is open",
+            "what application is currently open", "where am i", "current app", "active app"
+        ]
+        if any(aq in text for aq in active_app_queries):
+            res = await registry.execute("get_current_active_window")
+            return res.get("result")
+
+        # ── Email / Mail Composition ──────────────────────────────────────
+        # "compose a mail", "compose a male", "send an email", "write a mail"
+        email_queries = [
+            "compose a mail", "compose mail", "compose an email", "compose email",
+            "send a mail", "send an email", "write a mail", "write an email",
+            "open email", "new email", "new mail"
+        ]
+        if any(eq in text or eq in clean_cmd for eq in email_queries):
+            res = await registry.execute("compose_email")
+            return res.get("result", "Opening your email composer, Sir.")
 
         # ── Media Controls ────────────────────────────────────────────────
         if text in ("pause", "pause music", "pause video", "play", "play music", "resume", "resume music"):
@@ -93,7 +134,15 @@ class ToolRouter:
             res = await registry.execute("list_active_apps")
             return res.get("result")
 
-        # ── YouTube & Web Searches ────────────────────────────────────────
+        # ── YouTube Channels & Videos ─────────────────────────────────────
+        # "open dreams channel", "open dream channel on youtube", "go to dreams channel"
+        ch_match = re.search(r"(?:open|search|go\s+to|show\s+me)\s+(?:up\s+)?(.+?)\s+(?:channel(?:\s+on\s+youtube)?|on\s+youtube)", text)
+        if ch_match:
+            ch_name = ch_match.group(1).strip()
+            search_target = ch_name if ch_name.endswith("channel") else f"{ch_name} channel"
+            res = await registry.execute("search_youtube", query=search_target)
+            return res.get("result", f"Opening {search_target} on YouTube, Sir.")
+
         if text in ("open youtube", "open youtube in brave", "launch youtube", "go to youtube"):
             res = await registry.execute("open_website", url="https://www.youtube.com")
             return "Opening YouTube, Sir."
@@ -132,17 +181,29 @@ class ToolRouter:
                     return res.get("result", f"Searching web for {query}, Sir.")
 
         # ── Process Launching & Killing ───────────────────────────────────
-        # "open brave", "launch blender", "start discord", "open calculator"
-        launch_match = re.match(r"^(?:open|launch|start)\s+([a-zA-Z0-9_\-\.\s]+)$", text)
+        # Matches "then you open vs code for me", "can you open blender", "open brave", "launch vscode", "start notepad"
+        launch_match = re.search(
+            r"^(?:open|launch|start)\s+([a-zA-Z0-9_\-\.\s]+)$",
+            clean_cmd
+        )
+        if not launch_match:
+            launch_match = re.search(
+                r"(?:can\s+you\s+|could\s+you\s+|then\s+you\s+|please\s+|just\s+|i\s+want\s+(?:you\s+)?to\s+)?(?:open|launch|start)\s+(?:up\s+)?(?:the\s+)?([a-zA-Z0-9_\-\.\s]+?)(?:\s+for\s+me|\s+please)?$",
+                text
+            )
+
         if launch_match:
             app_target = launch_match.group(1).strip()
-            # Avoid matching general phrases like "open website" or "open file"
-            if not app_target.startswith(("website", "url", "file", "folder", "directory", "youtube", "google")):
+            # Clean app target and avoid matching web searches, websites, or emails
+            app_target = re.sub(r"\b(?:v\.s\.|v\.\s*s\.|v\s+s)\s*code\b", "vscode", app_target)
+            if not app_target.startswith(("website", "url", "file", "folder", "directory", "youtube", "google", "mail", "email", "channel")):
                 res = await registry.execute("launch_application", app_name=app_target)
                 return res.get("result", f"Opening {app_target}, Sir.")
 
         # "close brave", "kill chrome", "exit discord", "stop blender"
-        kill_match = re.match(r"^(?:close|kill|terminate|exit|stop)\s+([a-zA-Z0-9_\-\.\s]+)$", text)
+        kill_match = re.search(r"^(?:close|kill|terminate|exit|stop)\s+([a-zA-Z0-9_\-\.\s]+)$", clean_cmd)
+        if not kill_match:
+            kill_match = re.search(r"^(?:close|kill|terminate|exit|stop)\s+([a-zA-Z0-9_\-\.\s]+)$", text)
         if kill_match:
             app_target = kill_match.group(1).strip()
             if not app_target.startswith(("music", "video", "listening", "mode")):

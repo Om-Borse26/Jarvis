@@ -26,14 +26,20 @@ async def automate_browser(url: str, action: str = "navigate", selector: str = "
     if not target_url.startswith(("http://", "https://")):
         target_url = f"https://{target_url}"
 
+    act = action.lower().strip()
+
+    # For pure navigation without DOM selectors, open in visible default desktop browser
+    if act == "navigate" and not selector:
+        from jarvis.tools.web_control import open_website
+        return open_website(target_url)
+
     try:
         async with async_playwright() as p:
-            # Launch system Chrome channel
-            browser = await p.chromium.launch(channel="chrome", headless=True)
+            # Launch system Chrome channel in visible (headful) mode
+            browser = await p.chromium.launch(channel="chrome", headless=False)
             page = await browser.new_page()
             await page.goto(target_url, timeout=15000)
 
-            act = action.lower().strip()
             if act == "click" and selector:
                 await page.click(selector, timeout=6000)
                 result = f"Clicked element '{selector}' on {target_url}."

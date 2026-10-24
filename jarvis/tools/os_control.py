@@ -110,3 +110,60 @@ def show_desktop() -> str:
     """Minimize all open windows and show the desktop (Win+D)."""
     pyautogui.hotkey("win", "d")
     return "Desktop displayed."
+
+
+@register_tool(name="change_volume_relative", description="Increase or decrease master volume by a percentage delta (e.g. +10 or -10).", category="audio")
+def change_volume_relative(delta_percent: int = 10) -> str:
+    """Increase or decrease volume relative to current level."""
+    try:
+        import pycaw.pycaw as pycaw
+        spk = pycaw.AudioUtilities.GetSpeakers()
+        cur_scalar = spk.EndpointVolume.GetMasterVolumeLevelScalar()
+        new_scalar = max(0.0, min(1.0, cur_scalar + (float(delta_percent) / 100.0)))
+        spk.EndpointVolume.SetMasterVolumeLevelScalar(new_scalar, None)
+        vol_pct = round(new_scalar * 100)
+        action = "increased" if delta_percent > 0 else "decreased"
+        return f"Volume {action} to {vol_pct} percent, Sir."
+    except Exception as e:
+        logger.error(f"Relative volume error: {e}")
+        return f"Failed to adjust volume: {e}"
+
+
+@register_tool(name="get_current_active_window", description="Identify the currently focused application and active window title.", category="window")
+def get_current_active_window() -> str:
+    """Get active window title and process name."""
+    try:
+        import win32gui, win32process, psutil
+        hwnd = win32gui.GetForegroundWindow()
+        if hwnd:
+            title = win32gui.GetWindowText(hwnd)
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+            proc_name = ""
+            try:
+                proc_name = psutil.Process(pid).name()
+            except Exception:
+                pass
+            if title and title.strip():
+                return f"You are currently in '{title.strip()}' ({proc_name})."
+    except Exception:
+        pass
+    return "You are currently in your active desktop workspace."
+
+
+@register_tool(name="compose_email", description="Open email client or webmail to compose a mail / email.", category="system")
+def compose_email(to: str = "", subject: str = "", body: str = "") -> str:
+    """Open default email client to compose an email."""
+    import urllib.parse
+    params = []
+    if subject:
+        params.append(f"subject={urllib.parse.quote(subject)}")
+    if body:
+        params.append(f"body={urllib.parse.quote(body)}")
+    query = f"?{'&'.join(params)}" if params else ""
+    target = f"mailto:{to}{query}"
+    try:
+        subprocess.Popen(f'start "" "{target}"', shell=True)
+        return "Opening your email composer, Sir."
+    except Exception as e:
+        return f"Failed to open email composer: {e}"
+
