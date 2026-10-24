@@ -44,6 +44,7 @@ from jarvis.security.consent import consent_manager
 from jarvis.tools.mcp_runtime import mcp_manager
 from jarvis.memory.working import working_memory
 from jarvis.memory.episodic import episodic_memory
+from jarvis.core.scheduler import scheduler
 
 
 class JarvisPipeline:
@@ -97,6 +98,11 @@ class JarvisPipeline:
         self.consent.speak_fn = self._speak_async
         self.consent.arm_fn   = self._arm_listening
 
+        # ── Proactivity scheduler (reminders / recurring tasks) ─────────
+        self.scheduler = scheduler
+        self.scheduler.speak_fn   = self._speak_async
+        self.scheduler.command_fn = self._run_scheduled_command
+
         logger.info("JarvisPipeline initialized.")
 
     # ──────────────────────────────────────────────────────────────────
@@ -143,6 +149,9 @@ class JarvisPipeline:
         # 6. Connect MCP servers in the background (non-blocking, best-effort)
         asyncio.create_task(self._start_mcp_servers())
 
+        # 7. Start the proactivity scheduler (reminders, recurring tasks)
+        self.scheduler.start()
+
         self._running = True
         logger.success("✅ Jarvis is online and listening.")
 
@@ -167,6 +176,7 @@ class JarvisPipeline:
         self._running = False
         self.vad.stop()
         self.trigger.stop()
+        self.scheduler.stop()
         try:
             await mcp_manager.stop_all()
         except Exception:
@@ -512,6 +522,34 @@ class JarvisPipeline:
             await mcp_manager.start_all(only=autostart)
         except Exception as e:
             logger.warning(f"[MCP] Startup notice: {e}")
+
+    async def _run_scheduled_command(self, text: str):
+        """Execute a scheduled 'do' task through the agent loop and speak the result."""
+        if not text or not text.strip() or self.tts.is_speaking:
+            return
+        try:
+            logger.info(f"⏰ Running scheduled task: {text}")
+            system_prompt, user_msg = self.arbiter.build_prompt(
+                new_user_input = text,
+                user_name      = self._user_name,
+                current_time   = datetime.datetime.now().strftime("%H:%M"),
+                active_app     = self._active_app,
+                mood           = "neutral",
+                tone_guidance  = "Be brief.",
+            )
+            self._cancel_llm.clear()
+            final = await self.agent_loop.run(
+                user_request  = user_msg,
+                user_name     = self._user_name,
+                current_time  = datetime.datetime.now().strftime("%H:%M"),
+                active_app    = self._active_app,
+                mood          = "neutral",
+                system_prompt = system_prompt,
+            )
+            if final:
+                await self._speak_async(final)
+        except Exception as e:
+            logger.warning(f"Scheduled task failed: {e}")
 
     def _build_memory_context(self, user_text: str) -> str:
         """Compose the live (L2) + related past (L3) memory block for the prompt."""

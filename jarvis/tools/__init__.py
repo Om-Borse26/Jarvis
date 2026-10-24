@@ -36,6 +36,9 @@ from jarvis.tools import code_executor
 from jarvis.core import memory
 from jarvis import memory as memory_layers  # noqa: F401  (L2/L3/L4 + episodic tool)
 
+# ── Proactivity: reminders & recurring tasks ─────────────────────────────────
+from jarvis.core import scheduler as scheduler_tools  # noqa: F401  (registers scheduler tools)
+
 # ── Security: encrypted secrets vault + audit tools ──────────────────────────
 from jarvis import security  # noqa: F401  (registers vault tools)
 
