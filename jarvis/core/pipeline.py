@@ -41,6 +41,7 @@ from jarvis.tools.router   import ToolRouter
 from jarvis.core.agent_loop import AgentLoop
 from jarvis.audio.accent_normalizer import SpeechNormalizer
 from jarvis.security.consent import consent_manager
+from jarvis.tools.mcp_runtime import mcp_manager
 
 
 class JarvisPipeline:
@@ -137,6 +138,9 @@ class JarvisPipeline:
         logger.info("Starting trigger system...")
         self.trigger.start()
 
+        # 6. Connect MCP servers in the background (non-blocking, best-effort)
+        asyncio.create_task(self._start_mcp_servers())
+
         self._running = True
         logger.success("✅ Jarvis is online and listening.")
 
@@ -161,6 +165,10 @@ class JarvisPipeline:
         self._running = False
         self.vad.stop()
         self.trigger.stop()
+        try:
+            await mcp_manager.stop_all()
+        except Exception:
+            pass
         logger.info("Jarvis shut down.")
 
     # ──────────────────────────────────────────────────────────────────
@@ -480,6 +488,14 @@ class JarvisPipeline:
         """Open the active listening window (used by the consent gate to await a reply)."""
         self._listening = True
         self._listening_timestamp = time.time()
+
+    async def _start_mcp_servers(self):
+        """Launch the MCP servers selected in config (best-effort, non-fatal)."""
+        try:
+            autostart = self._cfg.get("mcp", {}).get("autostart_servers", [])
+            await mcp_manager.start_all(only=autostart)
+        except Exception as e:
+            logger.warning(f"[MCP] Startup notice: {e}")
 
     def _time_of_day(self) -> str:
         hour = datetime.datetime.now().hour

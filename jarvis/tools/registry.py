@@ -105,6 +105,24 @@ class ToolRegistry:
             return True
         return False
 
+    def register_external(
+        self,
+        name: str,
+        description: str,
+        category: str,
+        parameters: list[ToolParameter],
+        func: Callable,
+    ) -> None:
+        """Register a tool whose schema is supplied explicitly (e.g. an MCP tool)."""
+        self._tools[name] = ToolDefinition(
+            name=name,
+            description=description or f"Execute {name}",
+            category=category,
+            func=func,
+            parameters=parameters or [],
+        )
+        logger.debug(f"External tool registered: [{category}] {name}")
+
     def get_tool(self, tool_name: str) -> Optional[ToolDefinition]:
         return self._tools.get(tool_name)
 

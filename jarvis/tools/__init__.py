@@ -27,6 +27,7 @@ from jarvis.tools import computer_use
 
 # ── Tier 3: MCP Bridge ──────────────────────────────────────────────────────
 from jarvis.tools import mcp_bridge
+from jarvis.tools import mcp_runtime  # real stdio MCP client + control tools
 
 # ── Tier 4: Code execution ───────────────────────────────────────────────────
 from jarvis.tools import code_executor

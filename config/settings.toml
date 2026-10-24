@@ -73,6 +73,12 @@ vault_path      = "data/vault.db"
 # Master key is derived from Windows DPAPI — never stored in this file
 # Vault access always requires explicit user voice confirmation
 
+[mcp]
+# MCP servers to launch automatically at startup (by name from mcp_servers.json).
+# Leave empty [] to start none at boot and connect on demand via voice
+# ("connect the playwright server"). Others can be marked "disabled": true there.
+autostart_servers = ["playwright"]
+
 [hud]
 # Window behavior
 always_on_top       = true
