@@ -135,17 +135,32 @@ class ToolRouter:
             return res.get("result")
 
         # ── Filesystem & Explorer Controls ────────────────────────────────
-        # "create a folder called test_folder", "create a folder in vs code", "make a directory new_src"
-        mkdir_match = re.search(r"(?:create|make|add)\s+(?:a\s+)?(?:folder|directory)\s*(?:named|called)?\s*([a-zA-Z0-9_\-\./\\]+)", clean_cmd)
-        if not mkdir_match:
-            mkdir_match = re.search(r"(?:create|make|add)\s+(?:a\s+)?(?:folder|directory)\s*(?:named|called)?\s*([a-zA-Z0-9_\-\./\\]+)", text)
-        if mkdir_match:
-            folder_target = mkdir_match.group(1).strip()
-            # If the user says "create a folder in vs code" without a specific name, create 'new_folder'
-            if folder_target.lower() in ("in", "for", "the", "a", "vscode", "vs"):
-                folder_target = "new_folder"
-            res = await registry.execute("create_directory", path=folder_target)
-            return res.get("result", f"Created folder '{folder_target}', Sir.")
+        # 0. Compound command: "open vs code and create a demo folder in it"
+        comp_match = re.search(r"(?:open|launch)\s+([a-zA-Z0-9_\-\s]+?)\s+and\s+(?:create|make)\s+(?:a\s+)?(?:dummy\s+)?([a-zA-Z0-9_\-]+)?\s*(?:folder|directory)(?:\s+(?:called|named)\s+([a-zA-Z0-9_\-]+))?", clean_cmd)
+        if comp_match:
+            app_target = comp_match.group(1).strip()
+            folder_name = comp_match.group(2) or comp_match.group(3) or "demo_folder"
+            is_vscode = any(v in app_target.lower() for v in ["code", "vscode", "vs code"])
+            await registry.execute("launch_application", app_name=app_target)
+            res = await registry.execute("create_directory", path=folder_name, in_vscode=is_vscode)
+            return f"Switched to {app_target} and {res.get('result', f'created folder {folder_name}')}"
+
+        # 1. Targeted folder creation: "create a dummy folder in the root directory of vs code that I have opened", "create a dummy folder in vs code"
+        target_f = re.search(r"(?:create|make)\s+(?:a\s+)?(?:dummy\s+)?([a-zA-Z0-9_\-]+)?\s*(?:folder|directory)(?:\s+(?:called|named)\s+([a-zA-Z0-9_\-]+))?\s*(?:in|inside)\s*(?:the\s+root\s+directory\s+of\s+)?([a-zA-Z0-9_\-\.\s]+)", clean_cmd)
+        if target_f:
+            folder_name = target_f.group(1) or target_f.group(2) or "dummy_folder"
+            loc = target_f.group(3) or ""
+            is_vscode = any(v in loc.lower() for v in ["code", "vscode", "vs code"])
+            res = await registry.execute("create_directory", path=folder_name, in_vscode=is_vscode)
+            return res.get("result", f"Created folder '{folder_name}', Sir.")
+
+        # 2. Simple folder creation: "create a folder called test_folder", "create directory new_src"
+        simple_f = re.search(r"(?:create|make|add)\s+(?:a\s+)?(?:dummy\s+)?([a-zA-Z0-9_\-]+)?\s*(?:folder|directory)(?:\s+(?:called|named)\s+([a-zA-Z0-9_\-]+))?", clean_cmd)
+        if simple_f:
+            folder_name = simple_f.group(1) or simple_f.group(2) or "new_folder"
+            if folder_name.lower() not in ("a", "the", "in", "for"):
+                res = await registry.execute("create_directory", path=folder_name)
+                return res.get("result", f"Created folder '{folder_name}', Sir.")
 
         # "open explorer", "open file explorer", "show in explorer"
         if any(eq in text for eq in ["open explorer", "open file explorer", "open in explorer", "show in explorer", "open this in explorer"]):
@@ -182,22 +197,33 @@ class ToolRouter:
             res = await registry.execute("play_youtube_video", query=search_q)
             return res.get("result", f"Playing {search_q} on YouTube, Sir.")
 
-        # 3. Clean channel searches: "search for Yaboy Roshi's youtube channel", "open dreams channel"
+        # 3. Clean channel searches: "search for Yaboy Roshi's youtube channel", "open dreams channel", "watch dream's channel"
         clean_for_ch = re.sub(r"[?!.,]", " ", text)
         clean_for_ch = re.sub(r"\s+", " ", clean_for_ch).strip()
-        ch_match = re.search(r"(?:open|search|go\s+to|show\s+me)\s+(?:up\s+)?(.+?)\s+(?:channel(?:\s+on\s+youtube)?|on\s+youtube)", clean_for_ch)
+
+        is_new_tab = any(kw in text.lower() for kw in ["new tab", "another tab", "different tab"])
+        is_new_win = any(kw in text.lower() for kw in ["new window", "another window", "another instance"])
+        force_new = is_new_tab or is_new_win
+
+        clean_for_ch = re.sub(r"\s+(?:in|on)\s+(?:a\s+)?(?:new\s+tab|new\s+window|another\s+tab|another\s+window)", "", clean_for_ch, flags=re.IGNORECASE).strip()
+
+        had_channel_kw = "channel" in clean_for_ch.lower()
+        ch_match = re.search(r"(?:open|search|go\s+to|show\s+me|watch)\s+(?:up\s+)?(.+?)\s+(?:channel(?:\s+on\s+youtube)?|on\s+youtube)", clean_for_ch)
         if ch_match:
             raw_ch = ch_match.group(1).strip()
             # Strip inner conversational wrappers: "and search for", "and open", "for"
-            clean_ch = re.sub(r"^(?:(?:and\s+)?(?:search|open|find|go\s+to)\s+(?:for\s+)?|for\s+)+", "", raw_ch, flags=re.IGNORECASE).strip()
+            clean_ch = re.sub(r"^(?:(?:and\s+)?(?:search|open|find|go\s+to|watch)\s+(?:for\s+)?|for\s+)+", "", raw_ch, flags=re.IGNORECASE).strip()
             clean_ch = re.sub(r"['’]s$", "", clean_ch).strip()
             if clean_ch and len(clean_ch) > 2:
-                search_target = clean_ch if clean_ch.endswith("channel") else f"{clean_ch} channel"
-                res = await registry.execute("search_youtube", query=search_target)
+                if had_channel_kw:
+                    search_target = clean_ch if clean_ch.endswith("channel") else f"{clean_ch} channel"
+                else:
+                    search_target = clean_ch
+                res = await registry.execute("search_youtube", query=search_target, force_new=force_new, new_tab=is_new_tab)
                 return res.get("result", f"Opening {search_target} on YouTube, Sir.")
 
         if text in ("open youtube", "open youtube in brave", "launch youtube", "go to youtube"):
-            res = await registry.execute("open_website", url="https://www.youtube.com")
+            res = await registry.execute("open_website", url="https://www.youtube.com", force_new=force_new, new_tab=is_new_tab)
             return "Opening YouTube, Sir."
 
         yt_patterns = [
@@ -211,13 +237,13 @@ class ToolRouter:
             r"^open\s+(?:up\s+)?(.+?)\s+videos$",
         ]
         for pattern in yt_patterns:
-            m = re.search(pattern, text)
+            m = re.search(pattern, clean_for_ch)
             if m:
                 query = m.group(1).strip()
                 query = re.sub(r"^(?:some|a|the)\s+", "", query).strip()
                 if query:
                     search_q = f"{query} videos" if not query.endswith("videos") else query
-                    res = await registry.execute("search_youtube", query=search_q)
+                    res = await registry.execute("search_youtube", query=search_q, force_new=force_new, new_tab=is_new_tab)
                     return res.get("result", f"Opening {search_q} on YouTube, Sir.")
 
         # ── WhatsApp Messaging & Management ──────────────────────────────

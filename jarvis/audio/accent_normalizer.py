@@ -20,9 +20,9 @@ HOMOPHONE_MAP = [
     # WhatsApp acoustic variations ("what-up group", "wassup", "whats app")
     (r"\b(?:what[\s\-_]*up|wassup|whats[\s\-_]*app|what['’]s[\s\-_]*app)\b", "whatsapp"),
 
-    # VS Code / IDE acronyms
-    (r"\b(?:v\.s\.|v\.\s*s\.|v\s+s|we\s+s)\s*code\b", "vs code"),
-    (r"\bv\s*s\s*code\b", "vs code"),
+    # VS Code / IDE acronyms & phonetic slips ("viscode", "vsas code", "v s code")
+    (r"\b(?:viscode|vscod|vis\s*code|vsas\s*code|we\s*s\s*code)\b", "vs code"),
+    (r"\b(?:v\.s\.|v\.\s*s\.|v\s+s)\s*code\b", "vs code"),
     (r"\bvisual\s+studio\s+code\b", "vs code"),
     (r"\b(?:now\s+)?try\s+opening\b", "open"),
     (r"\bdo\s+one\s+thing[,\s]+", ""),
@@ -39,6 +39,8 @@ HOMOPHONE_MAP = [
     (r"\bdreams?\s+channel\b", "Dream channel on youtube"),
     (r"\bmine\s*craft\b", "minecraft"),
     (r"\byou\s*tube\b", "youtube"),
+    (r"\byt\s+channel\b", "youtube channel"),
+    (r"\byt\b", "youtube"),
 
     # MCPs, Software & Tools
     (r"\bstitch\s+(?:mcb|mcbb|mcibb|m\s*c\s*b)\b", "stitch mcp"),

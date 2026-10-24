@@ -10,10 +10,49 @@ Provides voice-accessible tools to:
 from __future__ import annotations
 
 import os
+import json
+import urllib.parse
 import subprocess
 from pathlib import Path
+from typing import Optional
 from loguru import logger
 from jarvis.tools.registry import register_tool
+
+
+def get_active_vscode_workspace() -> Optional[Path]:
+    """
+    Detect the active root workspace folder currently opened in Visual Studio Code.
+    Reads recent workspace records from VS Code's workspaceStorage.
+    """
+    try:
+        ws_dir = Path(os.environ.get("APPDATA", "")) / "Code" / "User" / "workspaceStorage"
+        if not ws_dir.exists():
+            return None
+        entries = []
+        for p in ws_dir.iterdir():
+            f = p / "workspace.json"
+            if f.exists():
+                try:
+                    entries.append((f.stat().st_mtime, f))
+                except Exception:
+                    pass
+        if not entries:
+            return None
+        entries.sort(key=lambda x: x[0], reverse=True)
+        for _, f in entries[:10]:
+            try:
+                data = json.loads(f.read_text("utf-8"))
+                folder_uri = data.get("folder")
+                if folder_uri and folder_uri.startswith("file:///"):
+                    raw = urllib.parse.unquote(folder_uri[8:])
+                    p = Path(raw)
+                    if p.exists() and p.is_dir():
+                        return p
+            except Exception:
+                pass
+    except Exception as e:
+        logger.debug(f"Could not detect VS Code workspace: {e}")
+    return None
 
 # Common search paths for rapid lookup
 COMMON_DIRS = [
@@ -153,18 +192,43 @@ def open_in_explorer(path: str = "") -> str:
 
 @register_tool(
     name="create_directory",
-    description="Create a new folder or directory on disk (e.g. 'new_folder', 'src/components').",
+    description="Create a new folder or directory on disk. Set in_vscode=True if creating inside an active VS Code window or workspace.",
     category="filesystem"
 )
-def create_directory(path: str) -> str:
-    """Create a new folder on disk."""
+def create_directory(path: str, in_vscode: bool = False) -> str:
+    """Create a new folder on disk. If in_vscode is True, resolves to the open VS Code workspace or opens it directly in VS Code."""
     clean_p = path.strip('"').strip("'").strip()
     if not clean_p:
         return "Please specify a folder name or path to create."
     try:
+        from jarvis.tools.process_control import focus_existing_window
+
+        if in_vscode:
+            active_ws = get_active_vscode_workspace()
+            if active_ws and active_ws.exists():
+                target = active_ws / clean_p
+                target.mkdir(parents=True, exist_ok=True)
+                resolved_path = str(target.resolve())
+                focus_existing_window("vscode")
+                return f"Created folder '{clean_p}' inside your active VS Code root directory ({active_ws.name}), Sir."
+            else:
+                # No active workspace was open in VS Code (e.g. empty VS Code window)
+                # Create on Desktop and open as workspace via 'code -r' (reuse open window)
+                desktop = Path.home() / "Desktop"
+                target = desktop / clean_p
+                target.mkdir(parents=True, exist_ok=True)
+                resolved_path = str(target.resolve())
+                try:
+                    subprocess.Popen(f'code -r "{resolved_path}"', shell=True)
+                except Exception:
+                    pass
+                focus_existing_window("vscode")
+                return f"Created folder '{clean_p}' and opened it in your VS Code window, Sir."
+
         target = Path(clean_p)
         target.mkdir(parents=True, exist_ok=True)
-        return f"Created folder '{clean_p}' at {target.resolve()}, Sir."
+        resolved_path = str(target.resolve())
+        return f"Created folder '{clean_p}' at {resolved_path}, Sir."
     except Exception as e:
         return f"Failed to create folder '{clean_p}': {e}"
 

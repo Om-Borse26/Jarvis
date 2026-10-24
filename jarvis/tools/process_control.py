@@ -21,6 +21,85 @@ from loguru import logger
 from jarvis.tools.registry import register_tool
 
 
+def focus_existing_window(app_query: str) -> Optional[str]:
+    """
+    Check if an application window is already running and bring it to the foreground.
+    Prevents spawning duplicate instances (e.g. cascading VS Code, Chrome, or Brave windows).
+    """
+    try:
+        import ctypes
+        import win32gui
+        import win32con
+
+        user32 = ctypes.windll.user32
+        # Ensure thread is attached to the interactive user desktop
+        hdesk = user32.OpenInputDesktop(0, False, 0x0100 | 0x0040)
+        if hdesk:
+            user32.SetThreadDesktop(hdesk)
+
+        q = app_query.lower().strip()
+        alias_map = {
+            "vscode": ["visual studio code", " - code"],
+            "vs code": ["visual studio code", " - code"],
+            "code": ["visual studio code", " - code"],
+            "vscod": ["visual studio code", " - code"],
+            "viscode": ["visual studio code", " - code"],
+            "brave": ["brave"],
+            "chrome": ["google chrome", "chrome"],
+            "edge": ["microsoft edge", "edge"],
+            "notepad": ["notepad"],
+            "blender": ["blender"],
+            "discord": ["discord"],
+            "whatsapp": ["whatsapp"],
+            "spotify": ["spotify"],
+            "explorer": ["file explorer", "this pc", "documents", "downloads"],
+            "terminal": ["powershell", "windows terminal", "cmd"],
+        }
+        search_terms = alias_map.get(q, [q])
+
+        target_hwnd = None
+        matched_title = ""
+
+        def enum_cb(hwnd, _):
+            nonlocal target_hwnd, matched_title
+            if win32gui.IsWindowVisible(hwnd):
+                title = win32gui.GetWindowText(hwnd).strip()
+                t_lower = title.lower()
+                for term in search_terms:
+                    # Ignore our own IDE window if searching for separate VS Code
+                    if term in ("visual studio code", " - code") and "antigravity" in t_lower:
+                        continue
+                    if term in t_lower:
+                        target_hwnd = hwnd
+                        matched_title = title
+                        return False
+            return True
+
+        try:
+            win32gui.EnumWindows(enum_cb, None)
+        except Exception:
+            pass
+
+        if target_hwnd:
+            cur_fg = user32.GetForegroundWindow()
+            cur_thread = user32.GetWindowThreadProcessId(cur_fg, None)
+            my_thread = ctypes.windll.kernel32.GetCurrentThreadId()
+
+            try:
+                user32.AttachThreadInput(cur_thread, my_thread, True)
+                user32.ShowWindow(target_hwnd, win32con.SW_RESTORE)
+                user32.SetForegroundWindow(target_hwnd)
+                user32.AttachThreadInput(cur_thread, my_thread, False)
+            except Exception:
+                win32gui.ShowWindow(target_hwnd, win32con.SW_RESTORE)
+                win32gui.SetForegroundWindow(target_hwnd)
+
+            return matched_title
+    except Exception as e:
+        logger.debug(f"Window focus notice: {e}")
+    return None
+
+
 class DynamicAppResolver:
     """
     Intelligent dynamic Windows application discovery and ranking engine.
@@ -171,8 +250,17 @@ class DynamicAppResolver:
 
         return None
 
-    def launch(self, query: str) -> str:
-        """Find best application match and launch it."""
+    def launch(self, query: str, force_new: bool = False) -> str:
+        """Find best application match, focusing existing window or launching if not running."""
+        clean_q = query.lower().strip()
+
+        # Step 1: Check if an open window already exists and reuse it!
+        if not force_new and not any(kw in clean_q for kw in ["new window", "another instance", "new tab", "duplicate"]):
+            existing_title = focus_existing_window(clean_q)
+            if existing_title:
+                logger.info(f"🔄 Reusing active window '{existing_title}' instead of spawning duplicate.")
+                return f"Switched to your open {clean_q} window, Sir."
+
         match = self.resolve(query)
         if not match:
             return f"I could not find an application matching '{query}' installed on your PC, Sir."
@@ -204,11 +292,11 @@ class DynamicAppResolver:
 app_resolver = DynamicAppResolver()
 
 
-@register_tool(name="launch_application", description="Launch an application dynamically by name (e.g. vs code, brave, blender, excel, docker, whatsapp, notepad).", category="process")
-def launch_application(app_name: str) -> str:
-    """Dynamically discover, rank, and launch any installed application without hardcoded paths."""
+@register_tool(name="launch_application", description="Launch an application dynamically by name or bring active window to front if already open.", category="process")
+def launch_application(app_name: str, force_new: bool = False) -> str:
+    """Dynamically focus existing application window or launch if not running."""
     clean = app_name.lower().strip()
-    return app_resolver.launch(clean)
+    return app_resolver.launch(clean, force_new=force_new)
 
 
 @register_tool(name="kill_process", description="Terminate a running application or process by name (e.g. chrome, brave, blender).", category="process")

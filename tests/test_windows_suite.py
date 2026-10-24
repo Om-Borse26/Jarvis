@@ -157,13 +157,20 @@ async def run_windows_suite():
         ("show desktop", "show_desktop"),
         ("lock my pc", "lock_workstation"),
 
-        # 5. Filesystem
-        ("Can you create a folder in vs code?", "create_directory"),
+        # 5. Filesystem & Compound Commands
+        ("can you open Viscode and create a demo folder in it?", "launch_application + create_directory"),
+        ("Can you create a dummy folder in the root directory of vs code that I have opened?", "create_directory"),
+        ("Create a dummy folder in VSAS code.", "create_directory"),
         ("create a folder called test_folder", "create_directory"),
         ("open explorer", "open_in_explorer"),
         ("find file settings.toml", "search_files"),
 
-        # 6. Clipboard & Telemetry
+        # 6. YouTube & Browser Controls (Tab Reuse & New Tab)
+        ("open minecraft videos on yt channel", "search_youtube"),
+        ("i want to watch dream's channel", "search_youtube"),
+        ("watch dream's channel in a new tab", "search_youtube"),
+
+        # 7. Clipboard & Telemetry
         ("read clipboard", "get_clipboard"),
         ("what is on my clipboard", "get_clipboard"),
         ("gpu temp", "get_hardware_metrics"),
