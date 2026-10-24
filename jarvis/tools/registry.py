@@ -5,6 +5,7 @@ modified, or removed effortlessly using simple Python decorators.
 """
 from __future__ import annotations
 
+import asyncio
 import inspect
 import importlib.util
 from dataclasses import dataclass, field
@@ -153,7 +154,9 @@ class ToolRegistry:
             if inspect.iscoroutinefunction(tool.func):
                 result = await tool.func(**kwargs)
             else:
-                result = tool.func(**kwargs)
+                # Run blocking tools off the event loop so one slow/hung tool
+                # can't freeze the whole assistant (audio, hotkey, TTS).
+                result = await asyncio.to_thread(tool.func, **kwargs)
             self._audit(tool_name, kwargs, "success", str(result))
             return {"status": "success", "result": result}
         except Exception as e:

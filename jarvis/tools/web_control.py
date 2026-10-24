@@ -81,6 +81,69 @@ def navigate_or_open_browser(url: str, force_new: bool = False, new_tab: bool = 
     return False
 
 
+def _focus_active_browser() -> bool:
+    """Bring the most recent Brave/Chrome/Edge window to the foreground. Returns True on success."""
+    try:
+        import ctypes
+        import win32gui
+        import win32con
+        import time
+
+        user32 = ctypes.windll.user32
+        hdesk = user32.OpenInputDesktop(0, False, 0x0100 | 0x0040)
+        if hdesk:
+            user32.SetThreadDesktop(hdesk)
+
+        target = None
+        def cb(hwnd, _):
+            nonlocal target
+            if win32gui.IsWindowVisible(hwnd):
+                t = win32gui.GetWindowText(hwnd).lower()
+                if any(b in t for b in ["brave", "chrome", "edge", "firefox", "opera"]):
+                    target = hwnd
+                    return False
+            return True
+        win32gui.EnumWindows(cb, None)
+        if not target:
+            return False
+
+        cur_fg = user32.GetForegroundWindow()
+        cur_thread = user32.GetWindowThreadProcessId(cur_fg, None)
+        my_thread = ctypes.windll.kernel32.GetCurrentThreadId()
+        try:
+            user32.AttachThreadInput(cur_thread, my_thread, True)
+            user32.ShowWindow(target, win32con.SW_RESTORE)
+            user32.SetForegroundWindow(target)
+            user32.AttachThreadInput(cur_thread, my_thread, False)
+        except Exception:
+            win32gui.ShowWindow(target, win32con.SW_RESTORE)
+            win32gui.SetForegroundWindow(target)
+        time.sleep(0.15)
+        return True
+    except Exception as e:
+        logger.debug(f"Focus browser notice: {e}")
+        return False
+
+
+@register_tool(
+    name="close_browser_tab",
+    description="Close the currently active browser tab (like Ctrl+W) in the user's browser. Use when asked to close or remove the current tab or the tab that was just opened.",
+    category="web"
+)
+def close_browser_tab() -> str:
+    """Close the active tab in the focused browser window."""
+    try:
+        import pyautogui
+        pyautogui.FAILSAFE = False
+        if not _focus_active_browser():
+            return "I couldn't find an open browser window to close a tab in, Sir."
+        pyautogui.hotkey("ctrl", "w")
+        return "Closed the active browser tab, Sir."
+    except Exception as e:
+        logger.error(f"close_browser_tab failed: {e}")
+        return f"I couldn't close the tab: {e}"
+
+
 @register_tool(
     name="search_youtube",
     description="Search YouTube for videos and open results in browser. Reuses existing browser tab unless force_new or new_tab is requested.",

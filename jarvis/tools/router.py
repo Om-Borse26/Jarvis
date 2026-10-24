@@ -222,6 +222,11 @@ class ToolRouter:
         is_new_win = any(kw in text.lower() for kw in ["new window", "another window", "another instance"])
         force_new = is_new_tab or is_new_win
 
+        # Close the active browser tab: "close this tab", "remove this tab", "close the tab you opened"
+        if re.search(r"(?:close|remove|delete)\s+(?:this|that|the|current|it)?\s*tab", text.lower()):
+            res = await registry.execute("close_browser_tab")
+            return res.get("result", "Closed the active browser tab, Sir.")
+
         clean_for_ch = re.sub(r"\s+(?:in|on)\s+(?:a\s+)?(?:new\s+tab|new\s+window|another\s+tab|another\s+window)", "", clean_for_ch, flags=re.IGNORECASE).strip()
 
         had_channel_kw = "channel" in clean_for_ch.lower()
