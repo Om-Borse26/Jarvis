@@ -24,14 +24,15 @@ _AUDIT_FILE = _AUDIT_DIR / "audit.jsonl"
 # Argument keys whose values must never be written to disk.
 _SENSITIVE_KEY = re.compile(r"(pass|pwd|secret|token|key|cred|auth|value)", re.IGNORECASE)
 
-# Tools that can modify the system, spend money, message people, or destroy data.
+# Tools that can destroy data, spend/send on your behalf, run arbitrary code,
+# or reach external systems — these require spoken confirmation.
 HIGH_RISK_TOOLS = {
     "execute_shell", "execute_python",
     "delete_file", "delete_directory", "move_path", "rename_path",
     "kill_process", "shutdown_pc", "restart_pc", "sleep_pc",
-    "git_push", "git_commit", "pip_install", "npm_run",
-    "send_whatsapp_message", "compose_email",
-    "save_secret", "delete_secret",
+    "git_push",
+    "send_whatsapp_message",
+    "delete_secret",
     "automate_browser",
 }
 

@@ -27,6 +27,7 @@ from loguru import logger
 
 from jarvis.tools.registry import registry
 from jarvis.core.rules_engine import rules_engine
+from jarvis.security.consent import consent_manager
 
 
 # ─── Data Structures ──────────────────────────────────────────────────────────
@@ -279,6 +280,13 @@ class AgentLoop:
                 return re.sub(r"[*#_`~]", "", content or "I've completed the requested action.").strip()
 
             logger.info(f"🔧 Agent step {iteration}/{self.MAX_ITERATIONS}: {tool_name}({tool_args})")
+
+            # Consent gate: pause for spoken confirmation on high-risk actions.
+            if consent_manager.requires_consent(tool_name, tool_args):
+                approved = await consent_manager.confirm(tool_name, tool_args)
+                if not approved:
+                    logger.info(f"🛑 User declined '{tool_name}'. Aborting task.")
+                    return "Understood, I won't proceed with that."
 
             # Speak a brief progress cue for genuinely multi-step tasks.
             if iteration >= 2 and self.speak_fn and iteration <= 5:

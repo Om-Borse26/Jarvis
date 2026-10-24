@@ -40,6 +40,7 @@ from jarvis.tools.registry import registry
 from jarvis.tools.router   import ToolRouter
 from jarvis.core.agent_loop import AgentLoop
 from jarvis.audio.accent_normalizer import SpeechNormalizer
+from jarvis.security.consent import consent_manager
 
 
 class JarvisPipeline:
@@ -87,6 +88,11 @@ class JarvisPipeline:
         # ── Wire HUD callbacks (set externally when HUD is ready) ────────
         self.tts.on_speaking_start = None
         self.tts.on_speaking_stop  = None
+
+        # ── Interactive consent gate (voice confirmation for risky actions)
+        self.consent = consent_manager
+        self.consent.speak_fn = self._speak_async
+        self.consent.arm_fn   = self._arm_listening
 
         logger.info("JarvisPipeline initialized.")
 
@@ -166,8 +172,10 @@ class JarvisPipeline:
         if self.tts.is_speaking:
             logger.info("🛑 Hotkey pressed during speech — interrupting playback.")
             self.tts.interrupt()
-            self._cancel_llm.set()
-            self.agent_loop.cancel()
+            # Don't cancel a task that's waiting on the user's confirmation.
+            if not self.consent.is_pending():
+                self._cancel_llm.set()
+                self.agent_loop.cancel()
 
         self._listening = True
         self._listening_timestamp = time.time()
@@ -193,8 +201,11 @@ class JarvisPipeline:
     def _on_barge_in(self):
         """Called when user explicitly interrupts."""
         self.arbiter.on_barge_in()
-        self._cancel_llm.set()
-        self.agent_loop.cancel()
+        # While a confirmation is pending, let the user's answer resolve it
+        # instead of cancelling the task that's awaiting consent.
+        if not self.consent.is_pending():
+            self._cancel_llm.set()
+            self.agent_loop.cancel()
         self._listening = True
         self._listening_timestamp = time.time()
 
@@ -330,6 +341,19 @@ class JarvisPipeline:
                     return
                 logger.debug(f"👤 Verified speaker: {name} (similarity={sim:.2f})")
 
+            # ── Consent interception ──────────────────────────────────────
+            # If a risky action is awaiting confirmation, treat this utterance
+            # as the yes/no answer rather than a new command.
+            if self.consent.is_pending():
+                verdict = self.consent.interpret(text)
+                if verdict is None:
+                    await self._speak_async("Sorry, is that a yes or a no?")
+                    self._arm_listening()
+                    return
+                self.consent.resolve(verdict)
+                self._arm_listening()
+                return
+
             # ── 1. Fast-path intent check (< 1ms instant OS execution) ────
             fast_resp = await self.tool_router.try_fast_path(text)
             if fast_resp:
@@ -451,6 +475,11 @@ class JarvisPipeline:
     async def _speak_async(self, text: str):
         """Speak text asynchronously without blocking the event loop."""
         await asyncio.to_thread(self.tts.speak, text)
+
+    def _arm_listening(self):
+        """Open the active listening window (used by the consent gate to await a reply)."""
+        self._listening = True
+        self._listening_timestamp = time.time()
 
     def _time_of_day(self) -> str:
         hour = datetime.datetime.now().hour

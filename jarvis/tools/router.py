@@ -16,6 +16,7 @@ from jarvis.tools.registry import registry
 
 
 from jarvis.audio.accent_normalizer import SpeechNormalizer
+from jarvis.security.consent import consent_manager
 
 
 class ToolRouter:
@@ -173,6 +174,8 @@ class ToolRouter:
         if del_f:
             folder_name = del_f.group(1).strip()
             if folder_name.lower() not in ("a", "the", "my", "this", "all", "it"):
+                if not await consent_manager.confirm("delete_directory", {"path": folder_name}):
+                    return "Understood, I won't delete it."
                 res = await registry.execute("delete_directory", path=folder_name)
                 return res.get("result", f"Deleted folder '{folder_name}', Sir.")
 
@@ -353,6 +356,8 @@ class ToolRouter:
             app_target = re.sub(r"\b(?:v\.s\.|v\.\s*s\.|v\s+s)\s*code\b", "vscode", app_target)
             DISALLOWED_KILL = ["music", "video", "listening", "mode", "tab", "file", "folder", "screen", "dummy"]
             if not any(dk in app_target for dk in DISALLOWED_KILL):
+                if not await consent_manager.confirm("kill_process", {"process_name": app_target}):
+                    return "Understood, I'll leave it open."
                 res = await registry.execute("kill_process", process_name=app_target)
                 return res.get("result", f"Closed {app_target}, Sir.")
 
