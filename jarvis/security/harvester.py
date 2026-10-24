@@ -1,24 +1,24 @@
 """
-J.A.R.V.I.S. — Credential Harvester
-Imports the user's OWN saved logins from local credential stores into the
-encrypted vault, so Jarvis can auto-fill / auto-login on command.
+J.A.R.V.I.S. — Credential Access (Hybrid)
+Gives Jarvis access to the user's OWN saved logins so it can auto-fill / log in.
 
-Supported sources (what Windows actually lets us read as the logged-in user):
-  - Chromium browsers (Brave, Chrome, Edge): `Login Data` SQLite, AES-GCM
-    encrypted with a key that is itself DPAPI-protected in `Local State`.
-  - Windows Credential Manager: generic credentials stored by desktop apps.
+Hybrid model (smallest stored footprint):
+  - Browser logins (Brave/Chrome/Edge) are read DECRYPT-ON-DEMAND: the matching
+    password is decrypted straight from the browser store at the moment it's
+    needed and wiped right after. Jarvis keeps NO second copy of them.
+  - The vault is used only for credentials that have no other home: tokens/keys
+    the user gives directly, and Windows Credential Manager entries (optional
+    import).
 
-NOT supported (by design of those platforms — they don't store reusable
-passwords): Steam, Epic, Battle.net and similar launchers keep OAuth tokens /
-session blobs, not passwords. For those, "seamless open" means launching the
-app (it stays logged in) or auto-typing a credential you saved yourself.
+Browser decryption: `Login Data` SQLite with AES-GCM values whose key lives,
+DPAPI-protected, in `Local State` — readable only by the current Windows user.
 
-Security:
-  - This reads ONLY the current user's own secrets; it decrypts nothing that
-    Windows wouldn't already decrypt for this account.
-  - Passwords are re-encrypted at rest in the vault (DPAPI) and are NEVER
-    returned to the LLM, spoken, or written to logs. Import tools return counts
-    and service/username metadata only.
+NOT supported (those platforms don't store reusable passwords — they keep OAuth
+tokens/session blobs): Steam, Epic, Battle.net and similar launchers. For those,
+"seamless open" means launching the app (it stays logged in).
+
+Security: passwords are never returned to the LLM, spoken, or written to logs.
+Lookups return counts and service/username metadata only.
 """
 from __future__ import annotations
 
@@ -107,74 +107,104 @@ def _decrypt_chromium_password(blob: bytes, key: bytes | None) -> str | None:
     return None
 
 
-def _import_one_chromium(browser: str, user_data_dir: Path) -> tuple[int, int]:
-    """Import all profiles of one Chromium browser. Returns (imported, failed)."""
-    key = _chromium_master_key(user_data_dir)
-    imported = failed = 0
-
-    profiles = [user_data_dir / "Default"]
-    profiles += [p for p in user_data_dir.glob("Profile *") if p.is_dir()]
-
-    for profile in profiles:
-        login_db = profile / "Login Data"
-        if not login_db.exists():
-            continue
-        # Copy out because the live DB is usually locked by the browser.
-        tmp = Path(tempfile.gettempdir()) / f"jarvis_logindata_{browser}_{profile.name}.db"
-        try:
-            shutil.copy2(login_db, tmp)
-            con = sqlite3.connect(tmp)
-            rows = con.execute(
-                "SELECT origin_url, username_value, password_value FROM logins"
-            ).fetchall()
-            con.close()
-        except Exception as e:
-            logger.debug(f"[Harvester] {browser}/{profile.name} read failed: {e}")
-            continue
-        finally:
-            try:
-                tmp.unlink(missing_ok=True)
-            except Exception:
-                pass
-
-        for origin_url, username, pw_blob in rows:
-            if not username and not pw_blob:
-                continue
-            password = _decrypt_chromium_password(pw_blob, key)
-            if password is None:
-                failed += 1
-                continue
-            service = urlparse(origin_url).netloc or origin_url or "unknown"
-            if vault.set_credential(service, username or "", password, url=origin_url, source=browser):
-                imported += 1
-            else:
-                failed += 1
-
-    return imported, failed
-
-
-def import_chromium(browser: str | None = None) -> dict:
-    """Import saved logins from one or all installed Chromium browsers."""
+def _iter_login_rows():
+    """Yield (browser, master_key, origin_url, username, password_blob) for every Chromium login."""
     if not _LOCALAPPDATA:
-        return {"imported": 0, "failed": 0, "sources": []}
-
-    targets = (
-        {browser: _CHROMIUM_BROWSERS[browser]}
-        if browser and browser in _CHROMIUM_BROWSERS
-        else _CHROMIUM_BROWSERS
-    )
-    total_imported = total_failed = 0
-    sources: list[str] = []
-    for name, rel in targets.items():
+        return
+    for name, rel in _CHROMIUM_BROWSERS.items():
         user_data_dir = Path(_LOCALAPPDATA) / rel
         if not user_data_dir.exists():
             continue
-        imp, fail = _import_one_chromium(name, user_data_dir)
-        if imp or fail:
-            sources.append(f"{name} ({imp})")
-        total_imported += imp
-        total_failed += fail
-    return {"imported": total_imported, "failed": total_failed, "sources": sources}
+        key = _chromium_master_key(user_data_dir)
+        profiles = [user_data_dir / "Default"]
+        profiles += [p for p in user_data_dir.glob("Profile *") if p.is_dir()]
+        for profile in profiles:
+            login_db = profile / "Login Data"
+            if not login_db.exists():
+                continue
+            # Copy out because the live DB is usually locked by the browser.
+            tmp = Path(tempfile.gettempdir()) / f"jarvis_logindata_{name}_{profile.name}.db"
+            try:
+                shutil.copy2(login_db, tmp)
+                con = sqlite3.connect(tmp)
+                rows = con.execute(
+                    "SELECT origin_url, username_value, password_value FROM logins"
+                ).fetchall()
+                con.close()
+            except Exception as e:
+                logger.debug(f"[Harvester] {name}/{profile.name} read failed: {e}")
+                continue
+            finally:
+                try:
+                    tmp.unlink(missing_ok=True)
+                except Exception:
+                    pass
+            for origin_url, username, pw_blob in rows:
+                yield name, key, origin_url, username, pw_blob
+
+
+def lookup_browser_login(query: str) -> dict | None:
+    """Decrypt ONE matching browser login on demand (no stored copy). In-process ONLY."""
+    q = (query or "").strip().lower()
+    if not q:
+        return None
+    for browser, key, origin_url, username, pw_blob in _iter_login_rows():
+        host = urlparse(origin_url).netloc.lower()
+        if q in host or q in (origin_url or "").lower():
+            password = _decrypt_chromium_password(pw_blob, key)
+            if password:
+                return {
+                    "service": host or origin_url,
+                    "username": username or "",
+                    "password": password,
+                    "url": origin_url,
+                    "source": browser,
+                }
+    return None
+
+
+def list_browser_logins(query: str = "") -> list[dict]:
+    """List browser-login metadata on demand — NEVER decrypts or returns passwords."""
+    q = (query or "").strip().lower()
+    out: list[dict] = []
+    seen: set = set()
+    for browser, _key, origin_url, username, _pw_blob in _iter_login_rows():
+        host = urlparse(origin_url).netloc
+        if q and q not in host.lower() and q not in (origin_url or "").lower():
+            continue
+        dedup = (host, username)
+        if dedup in seen:
+            continue
+        seen.add(dedup)
+        out.append({"service": host or origin_url, "username": username or "", "url": origin_url, "source": browser})
+    return out
+
+
+def import_chromium(browser: str | None = None) -> dict:
+    """Bulk-copy saved logins from Chromium browsers into the vault (optional opt-in)."""
+    imported = failed = 0
+    sources: dict[str, int] = {}
+    want = {"brave": "Brave", "chrome": "Chrome", "edge": "Edge"}.get((browser or "").lower())
+    for name, key, origin_url, username, pw_blob in _iter_login_rows():
+        if want and name != want:
+            continue
+        if not username and not pw_blob:
+            continue
+        password = _decrypt_chromium_password(pw_blob, key)
+        if password is None:
+            failed += 1
+            continue
+        service = urlparse(origin_url).netloc or origin_url or "unknown"
+        if vault.set_credential(service, username or "", password, url=origin_url, source=name):
+            imported += 1
+            sources[name] = sources.get(name, 0) + 1
+        else:
+            failed += 1
+    return {
+        "imported": imported,
+        "failed": failed,
+        "sources": [f"{k} ({v})" for k, v in sources.items()],
+    }
 
 
 # ─── Windows Credential Manager ───────────────────────────────────────────────
@@ -215,17 +245,17 @@ def import_windows_credentials() -> dict:
 
 @register_tool(
     name="import_credentials",
-    description="Import the user's OWN saved logins from local stores (browsers, Windows Credential Manager) into the encrypted vault so Jarvis can auto-fill them later. Use when the user asks Jarvis to learn or import their saved passwords. Returns only counts — never the actual passwords.",
+    description="Import credentials into the encrypted vault. Browser logins (Brave/Chrome/Edge) are read on demand and normally do NOT need importing; use this mainly to pull Windows Credential Manager entries, or pass source='browsers' to also keep an offline copy of browser logins. Returns only counts — never passwords.",
     category="security",
 )
-def import_credentials(source: str = "all") -> str:
-    """Harvest saved logins into the vault. `source`: all | browsers | brave | chrome | edge | windows."""
-    src = (source or "all").strip().lower()
+def import_credentials(source: str = "windows") -> str:
+    """Import logins into the vault. source: windows | browsers | brave | chrome | edge | all."""
+    src = (source or "windows").strip().lower()
     parts: list[str] = []
     total = 0
 
     if src in ("all", "browsers", "brave", "chrome", "edge"):
-        browser = {"brave": "Brave", "chrome": "Chrome", "edge": "Edge"}.get(src)
+        browser = {"brave": "brave", "chrome": "chrome", "edge": "edge"}.get(src)
         res = import_chromium(browser)
         total += res["imported"]
         if res["sources"]:
@@ -237,50 +267,61 @@ def import_credentials(source: str = "all") -> str:
             parts.append(f"Windows Credential Manager: {res['imported']}")
 
     if total == 0:
-        return "I didn't find any readable saved logins to import."
+        return "I didn't find any readable credentials to import."
     detail = "; ".join(parts) if parts else ""
-    return f"Imported {total} logins into the encrypted vault ({detail}). Passwords stay encrypted and are never shown."
+    return f"Imported {total} credentials into the encrypted vault ({detail}). Passwords stay encrypted and are never shown."
 
 
 @register_tool(
     name="find_login",
-    description="Find whether a saved login exists for a service or website and report its username. Never reveals the password.",
+    description="Find whether a login exists for a service or website and report its username. Checks both the browser stores (on demand) and the vault. Never reveals the password.",
     category="security",
 )
 def find_login(service: str) -> str:
     """Look up a saved login by service/website name (metadata only)."""
-    matches = vault.find_credentials(service)
-    if not matches:
+    matches = list_browser_logins(service) + vault.find_credentials(service)
+    # De-duplicate by (service, username).
+    seen, unique = set(), []
+    for m in matches:
+        key = (m["service"], m.get("username", ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(m)
+    if not unique:
         return f"I don't have a saved login for '{service}'."
-    top = matches[:5]
+    top = unique[:5]
     listed = "; ".join(f"{m['service']} (user: {m['username'] or 'n/a'})" for m in top)
-    more = "" if len(matches) <= 5 else f" and {len(matches) - 5} more"
+    more = "" if len(unique) <= 5 else f" and {len(unique) - 5} more"
     return f"I have saved logins for: {listed}{more}."
 
 
 @register_tool(
     name="list_logins",
-    description="List how many logins are stored and the services/usernames (never passwords).",
+    description="List how many logins are available (browser stores + vault) and some example services. Never reveals passwords.",
     category="security",
 )
 def list_logins() -> str:
-    """Summarize stored logins without revealing any passwords."""
-    n = vault.count_credentials()
-    if n == 0:
-        return "No logins are stored in the vault yet."
-    sample = vault.find_credentials("")[:10]
-    names = ", ".join(sorted({m["service"] for m in sample}))
-    return f"I have {n} logins stored. Examples: {names}."
+    """Summarize available logins without revealing any passwords."""
+    browser = list_browser_logins("")
+    vault_n = vault.count_credentials()
+    total = len(browser) + vault_n
+    if total == 0:
+        return "No logins are available yet."
+    services = sorted({m["service"] for m in browser[:20]} | {m["service"] for m in vault.find_credentials("")[:20]})
+    names = ", ".join(services[:10])
+    return f"I have about {total} logins available. Examples: {names}."
 
 
 @register_tool(
     name="autofill_login",
-    description="Type a stored login into the CURRENTLY FOCUSED login form (username, Tab, password, Enter). Use after opening an app or website and clicking the username field. The password is typed directly and is never shown or spoken.",
+    description="Type a saved login into the CURRENTLY FOCUSED login form (username, Tab, password, Enter). Prefers the live browser store, falls back to the vault. Use after opening an app/site and clicking the username field. The password is typed directly and is never shown or spoken.",
     category="security",
 )
 def autofill_login(service: str, mode: str = "user_pass") -> str:
-    """Type a vaulted credential into the focused field. mode: user_pass | password_only."""
-    cred = vault.get_credential(service)
+    """Type a credential into the focused field. mode: user_pass | password_only."""
+    # Hybrid: decrypt on demand from the browser first; fall back to the vault.
+    cred = lookup_browser_login(service) or vault.get_credential(service)
     if not cred:
         return f"I don't have a saved login for '{service}'."
     try:
