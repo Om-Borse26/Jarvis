@@ -145,6 +145,60 @@ class ToolRegistry:
             lines.append("")
         return "\n".join(lines).strip()
 
+    # Python annotation names → JSON Schema types (for native function calling).
+    _JSON_TYPE_MAP = {
+        "int": "integer", "integer": "integer",
+        "float": "number", "number": "number", "double": "number",
+        "bool": "boolean", "boolean": "boolean",
+        "str": "string", "string": "string",
+        "list": "array", "tuple": "array", "sequence": "array",
+        "dict": "object", "mapping": "object",
+    }
+
+    @classmethod
+    def _json_type(cls, py_type: str) -> str:
+        """Map a Python type annotation name to a JSON Schema type."""
+        base = (py_type or "").strip().lower().replace("typing.", "")
+        # Strip optional/union wrappers like "optional[int]" → "int"
+        if "[" in base:
+            inner = base[base.find("[") + 1 : base.rfind("]")]
+            inner = inner.split(",")[0].strip()
+            if inner and inner not in ("none",):
+                base = inner
+        return cls._JSON_TYPE_MAP.get(base, "string")
+
+    def get_tools_schema(self, categories: Optional[list[str]] = None) -> list[dict]:
+        """
+        Return all registered tools in native Ollama/OpenAI function-calling format.
+        This is what gets passed to the model's `tools=` parameter.
+        """
+        schemas: list[dict] = []
+        for t in self._tools.values():
+            if categories and t.category not in categories:
+                continue
+            properties: dict[str, Any] = {}
+            required: list[str] = []
+            for p in t.parameters:
+                properties[p.name] = {
+                    "type": self._json_type(p.param_type),
+                    "description": p.description or p.name,
+                }
+                if p.required:
+                    required.append(p.name)
+            schemas.append({
+                "type": "function",
+                "function": {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": {
+                        "type": "object",
+                        "properties": properties,
+                        "required": required,
+                    },
+                },
+            })
+        return schemas
+
     def auto_discover_plugins(self, plugins_dir: Path | str) -> int:
         """
         Scan a directory and automatically import all .py plugin files.

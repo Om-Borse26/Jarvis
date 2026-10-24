@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from typing import AsyncIterator, Optional
 
@@ -161,6 +162,103 @@ class OllamaClient:
         async for token in self.stream(system_prompt, user_message, model, history):
             tokens.append(token)
         return "".join(tokens)
+
+    # ──────────────────────────────────────────────────────────────────
+    # Native function calling (ReAct agent loop)
+    # ──────────────────────────────────────────────────────────────────
+
+    async def chat_with_tools(
+        self,
+        messages: list,
+        tools: list,
+        model: Optional[str] = None,
+        cancel_event: Optional[asyncio.Event] = None,
+        temperature: float = 0.4,
+        num_predict: int = 512,
+        num_ctx: int = 8192,
+    ) -> dict:
+        """
+        Single-shot chat using Ollama's native function-calling.
+
+        Returns a normalized decision dict:
+            {
+              "content":    str,                     # spoken/final text (empty if tool call)
+              "tool_calls": [{"name": str, "arguments": dict}, ...],
+            }
+
+        The caller (agent loop) inspects tool_calls: if present, execute them;
+        otherwise treat `content` as the final response.
+        """
+        if model is None:
+            last_user = next(
+                (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
+                "",
+            )
+            model = self.route_model(last_user)
+
+        try:
+            resp = await self._client.chat(
+                model      = model,
+                messages   = messages,
+                tools      = tools,
+                stream     = False,
+                keep_alive = "24h",
+                options    = {
+                    "num_ctx": num_ctx,
+                    "temperature": temperature,
+                    "top_p": 0.9,
+                    "num_predict": num_predict,
+                },
+                think      = False,
+            )
+        except ollama.ResponseError as e:
+            logger.error(f"Ollama tool-call error: {e}")
+            return {"content": f"I encountered an error: {e}", "tool_calls": []}
+        except Exception as e:
+            logger.error(f"Ollama tool-call failure: {e}")
+            return {"content": "", "tool_calls": []}
+
+        if cancel_event and cancel_event.is_set():
+            return {"content": "", "tool_calls": []}
+
+        return self._normalize_tool_response(resp)
+
+    @staticmethod
+    def _normalize_tool_response(resp) -> dict:
+        """Flatten Ollama's response (pydantic object or dict) into a plain decision dict."""
+        if isinstance(resp, dict):
+            msg = resp.get("message", {}) or {}
+        else:
+            msg = getattr(resp, "message", None) or {}
+
+        def _get(obj, key, default=None):
+            if isinstance(obj, dict):
+                return obj.get(key, default)
+            return getattr(obj, key, default)
+
+        content = _get(msg, "content", "") or ""
+        raw_calls = _get(msg, "tool_calls", None) or []
+
+        tool_calls: list[dict] = []
+        for tc in raw_calls:
+            fn = _get(tc, "function", None)
+            if fn is None:
+                continue
+            name = _get(fn, "name", "") or ""
+            args = _get(fn, "arguments", {}) or {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except Exception:
+                    args = {}
+            if name:
+                tool_calls.append({"name": name, "arguments": args})
+
+        # Strip stray reasoning tags the model may leak into content.
+        if content:
+            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+
+        return {"content": content, "tool_calls": tool_calls}
 
     async def warm_up(self):
         """

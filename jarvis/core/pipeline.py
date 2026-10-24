@@ -374,63 +374,55 @@ class JarvisPipeline:
                 mood           = mood_state.mood,
                 tone_guidance  = mood_state.tone_guidance,
             )
-            # Inject dynamic registered tool capabilities for LLM
-            system_prompt += self.tool_router.get_tool_prompt_section()
 
-            # ── 4. Stream LLM response → TTS ─────────────────────────────
+            # ── 4. Single tool-aware decision (native function calling) ──
+            # One LLM call decides: speak conversationally OR invoke a tool.
+            # If a tool is chosen, the agent loop continues the ReAct cycle,
+            # seeded with this first decision (no redundant second LLM call).
             self._cancel_llm.clear()
-            response_buffer = []
+            messages = [{"role": "system", "content": system_prompt}]
+            history = self._conversation_history[-self._max_history:]
+            if history:
+                messages.extend(history)
+            messages.append({"role": "user", "content": user_msg})
 
-            async def stream_to_tts():
-                """Stream tokens, detect tool calls, and speak in natural chunks."""
-                pending = ""
-                is_tool_call_stream = False
+            tools = registry.get_tools_schema()
+            decision = await self.llm.chat_with_tools(
+                messages     = messages,
+                tools        = tools,
+                cancel_event = self._cancel_llm,
+            )
 
-                async for token in self.llm.stream(
-                    system_prompt = system_prompt,
-                    user_message  = user_msg,
-                    history       = self._conversation_history[-self._max_history:],
-                    cancel_event  = self._cancel_llm,
-                ):
-                    response_buffer.append(token)
-                    pending += token
-
-                    accumulated = "".join(response_buffer).strip()
-                    if "TOOL_CALL:" in accumulated or accumulated.startswith("TOOL_"):
-                        is_tool_call_stream = True
-
-                    # If this is regular conversational text, stream sentence-by-sentence to TTS
-                    if not is_tool_call_stream:
-                        if any(pending.rstrip().endswith(p) for p in [".", "!", "?"]):
-                            clean_candidate = pending.strip()
-                            if len(clean_candidate) >= 15 and not clean_candidate.endswith(("Mr.", "Dr.", "e.g.", "vs.", "i.e.")):
-                                sentence = clean_candidate
-                                pending = ""
-                                if sentence:
-                                    logger.debug(f"🤖 Jarvis: {sentence}")
-                                    await asyncio.to_thread(self.tts.speak, sentence, False)
-
-                # Process end of stream
-                full_resp = "".join(response_buffer).strip()
-                if is_tool_call_stream:
-                    logger.info(f"🤖 Multi-step / tool workflow initiated via AgentLoop for: '{text}'")
-                    spoken_confirm = await self.agent_loop.run(
-                        user_request=text,
-                        user_name=self._user_name,
-                        current_time=datetime.datetime.now().strftime("%H:%M"),
-                        active_app=self._active_app,
-                        mood=mood_state.mood,
-                        conversation_history=self._conversation_history,
-                    )
-                    if spoken_confirm and not self._cancel_llm.is_set():
-                        logger.info(f"🤖 Jarvis: {spoken_confirm}")
-                        await asyncio.to_thread(self.tts.speak, spoken_confirm, False)
-                    response_buffer.clear()
-                    response_buffer.append(spoken_confirm)
-                elif pending.strip() and not self._cancel_llm.is_set():
-                    await asyncio.to_thread(self.tts.speak, pending.strip(), False)
-
-            await stream_to_tts()
+            final_response = ""
+            if self._cancel_llm.is_set():
+                final_response = ""
+            elif decision["tool_calls"]:
+                # ── Action / multi-step path via the agent loop ──────────
+                logger.info(f"🤖 Tool workflow via AgentLoop for: '{text}'")
+                final_response = await self.agent_loop.run(
+                    user_request         = user_msg,
+                    user_name            = self._user_name,
+                    current_time         = datetime.datetime.now().strftime("%H:%M"),
+                    active_app           = self._active_app,
+                    mood                 = mood_state.mood,
+                    conversation_history = self._conversation_history,
+                    system_prompt        = system_prompt,
+                    seed_tool_call       = decision["tool_calls"][0],
+                )
+                if final_response and not self._cancel_llm.is_set():
+                    logger.info(f"🤖 Jarvis: {final_response}")
+                    await asyncio.to_thread(self.tts.speak, final_response, False)
+            else:
+                # ── Conversational path — speak the response ─────────────
+                final_response = re.sub(r"[*#_`~]", "", decision["content"] or "").strip()
+                if final_response and not self._cancel_llm.is_set():
+                    for sentence in re.split(r"(?<=[.!?])\s+", final_response):
+                        if self._cancel_llm.is_set():
+                            break
+                        sentence = sentence.strip()
+                        if sentence:
+                            logger.debug(f"🤖 Jarvis: {sentence}")
+                            await asyncio.to_thread(self.tts.speak, sentence, False)
 
             # Keep listening open for 15 seconds for seamless conversational follow-ups
             self._listening = True
@@ -438,11 +430,10 @@ class JarvisPipeline:
             logger.info("🎙️ Jarvis is standing by for follow-up questions (15s)...")
 
             # ── 5. Update conversation history ───────────────────────────
-            if response_buffer:
-                full_response = "".join(response_buffer)
+            if final_response:
                 self._conversation_history.extend([
                     {"role": "user",      "content": text},
-                    {"role": "assistant", "content": full_response},
+                    {"role": "assistant", "content": final_response},
                 ])
                 # Trim history to max window
                 if len(self._conversation_history) > self._max_history:

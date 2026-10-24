@@ -197,115 +197,131 @@ class AgentLoop:
         active_app: str = "Desktop",
         mood: str = "neutral",
         conversation_history: Optional[list] = None,
+        system_prompt: Optional[str] = None,
+        seed_tool_call: Optional[dict] = None,
     ) -> str:
         """
-        Execute a user request through the iterative agent loop.
+        Execute a user request through the iterative ReAct loop using native
+        Ollama function-calling.
+
+        Args:
+            system_prompt: Optional caller-supplied system prompt (e.g. the steer-aware
+                prompt from the Arbiter). Falls back to the built-in agent prompt.
+            seed_tool_call: Optional first tool call already decided by the caller
+                (e.g. the pipeline's initial tool-aware turn), so the loop does not
+                re-query the model for step 1.
 
         Returns:
             The final spoken response text.
         """
         self._cancel_event.clear()
         observations: List[Observation] = []
-        tools_schema = registry.get_prompt_schema()
+        tools = registry.get_tools_schema()
+
+        base_system = system_prompt or AGENT_SYSTEM_PROMPT.format(
+            user_name=user_name,
+            time=current_time,
+            active_app=active_app,
+            mood=mood,
+            tools_schema="(provided via native function calling)",
+            observations_section="",
+        )
+
+        messages: List[Dict[str, Any]] = [{"role": "system", "content": base_system}]
+        if conversation_history:
+            messages.extend(conversation_history[-6:])
+        messages.append({"role": "user", "content": user_request})
 
         logger.info(f"🤖 Agent loop started for: '{user_request[:100]}'")
+
+        pending_seed = seed_tool_call
 
         for iteration in range(1, self.MAX_ITERATIONS + 1):
             if self._cancel_event.is_set():
                 logger.info("Agent loop cancelled by user.")
                 return "Operation cancelled."
 
-            # ── 1. Build the prompt with current observations ─────────────
-            obs_section = _build_observations_section(observations)
-            system_prompt = AGENT_SYSTEM_PROMPT.format(
-                user_name=user_name,
-                time=current_time,
-                active_app=active_app,
-                mood=mood,
-                tools_schema=tools_schema,
-                observations_section=obs_section,
-            )
-
-            # On the first iteration, use the raw user request
-            # On subsequent iterations, remind the LLM of the original request
-            if iteration == 1:
-                user_msg = user_request
+            # ── 1. Decide next action ────────────────────────────────────
+            if pending_seed and iteration == 1:
+                content = ""
+                tool_calls = [pending_seed]
+                pending_seed = None
             else:
-                user_msg = (
-                    f"Original request: {user_request}\n\n"
-                    f"You have completed {len(observations)} steps so far. "
-                    f"Review your previous actions and decide: is the task fully done? "
-                    f"If yes, respond with FINAL_RESPONSE. If not, call the next tool."
+                decision = await self.llm.chat_with_tools(
+                    messages=messages,
+                    tools=tools,
+                    cancel_event=self._cancel_event,
                 )
+                content = decision["content"]
+                tool_calls = decision["tool_calls"]
 
-            # ── 2. Get LLM decision ──────────────────────────────────────
-            response_tokens = []
-            async for token in self.llm.stream(
-                system_prompt=system_prompt,
-                user_message=user_msg,
-                history=conversation_history[-6:] if conversation_history else None,
-                cancel_event=self._cancel_event,
-            ):
-                response_tokens.append(token)
+                # Fallback: model emitted the legacy "TOOL_CALL:" text format.
+                if not tool_calls and content and "TOOL_CALL:" in content:
+                    parsed = parse_agent_decision(content)
+                    if not parsed.is_final and parsed.tool_name:
+                        tool_calls = [{"name": parsed.tool_name, "arguments": parsed.tool_args}]
+                        content = ""
 
-            full_response = "".join(response_tokens).strip()
-            logger.debug(f"Agent iteration {iteration} raw response: {full_response[:200]}")
+            # ── 2. No tool call → final response ─────────────────────────
+            if not tool_calls:
+                final = re.sub(r"[*#_`~]", "", content or "").strip()
+                if not final:
+                    final = "Task completed." if observations else "I'm not sure how to help with that."
+                logger.success(f"✅ Agent loop completed in {iteration} iteration(s): {final[:100]}")
+                return final
 
-            # ── 3. Parse the decision ────────────────────────────────────
-            decision = parse_agent_decision(full_response)
-
-            # ── 4a. If final response, return it ────────────────────────
-            if decision.is_final:
-                logger.success(
-                    f"✅ Agent loop completed in {iteration} iteration(s): "
-                    f"{decision.response_text[:100]}"
-                )
-                return decision.response_text
-
-            # ── 4b. Execute the tool ─────────────────────────────────────
-            tool_name = decision.tool_name
-            tool_args = decision.tool_args
+            # ── 3. Execute the chosen tool (one per step) ────────────────
+            tc = tool_calls[0]
+            tool_name = tc.get("name", "")
+            tool_args = tc.get("arguments", {}) or {}
 
             if not tool_name:
-                logger.warning(f"Agent produced empty tool name at iteration {iteration}")
-                # Treat as final response with whatever text was generated
-                return decision.reasoning or full_response or "I've completed the requested action."
+                return re.sub(r"[*#_`~]", "", content or "I've completed the requested action.").strip()
 
-            logger.info(
-                f"🔧 Agent step {iteration}/{self.MAX_ITERATIONS}: "
-                f"{tool_name}({tool_args}) — {decision.reasoning[:80]}"
-            )
+            logger.info(f"🔧 Agent step {iteration}/{self.MAX_ITERATIONS}: {tool_name}({tool_args})")
 
-            # Speak progress for multi-step tasks (only after step 2+)
+            # Speak a brief progress cue for genuinely multi-step tasks.
             if iteration >= 2 and self.speak_fn and iteration <= 5:
-                progress_msg = f"Step {iteration}. {decision.reasoning[:50]}."
-                asyncio.create_task(self.speak_fn(progress_msg))
+                asyncio.create_task(self.speak_fn("One moment."))
 
-            # Execute the tool
             try:
                 exec_result = await registry.execute(tool_name, **tool_args)
-                result_text = exec_result.get("result", exec_result.get("message", "Done."))
+                if exec_result.get("status") == "success":
+                    result_text = exec_result.get("result", "Done.")
+                else:
+                    result_text = exec_result.get("message", "The tool reported an error.")
             except Exception as e:
                 result_text = f"Error: {e}"
                 logger.error(f"Tool {tool_name} failed: {e}")
 
-            # ── 5. Record observation ────────────────────────────────────
-            obs = Observation(
+            result_text = str(result_text)
+
+            # ── 4. Record observation + feed result back to the model ────
+            observations.append(Observation(
                 step=iteration,
-                reasoning=decision.reasoning,
+                reasoning=content,
                 tool_name=tool_name,
                 tool_args=tool_args,
-                result=str(result_text)[:1000],  # Cap result length
-            )
-            observations.append(obs)
+                result=result_text[:1000],
+            ))
 
-            # Update rules engine context
             rules_engine.update_context(
                 tool=tool_name,
                 args=tool_args,
-                result=str(result_text),
+                result=result_text,
                 entity=tool_args.get("path", tool_args.get("app_name", tool_args.get("file_path", ""))),
             )
+
+            messages.append({
+                "role": "assistant",
+                "content": content,
+                "tool_calls": [{"type": "function", "function": {"name": tool_name, "arguments": tool_args}}],
+            })
+            messages.append({
+                "role": "tool",
+                "content": result_text[:1000],
+                "tool_name": tool_name,
+            })
 
         # ── Max iterations reached ────────────────────────────────────────
         logger.warning(f"Agent loop hit MAX_ITERATIONS ({self.MAX_ITERATIONS})")
