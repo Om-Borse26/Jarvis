@@ -280,7 +280,9 @@ class AgentLoop:
             if not tool_name:
                 return re.sub(r"[*#_`~]", "", content or "I've completed the requested action.").strip()
 
-            logger.info(f"🔧 Agent step {iteration}/{self.MAX_ITERATIONS}: {tool_name}({tool_args})")
+            from jarvis.security.audit import redact
+            safe_args = redact(tool_args)
+            logger.info(f"🔧 Agent step {iteration}/{self.MAX_ITERATIONS}: {tool_name}({safe_args})")
 
             # Consent gate: pause for spoken confirmation on high-risk actions.
             if consent_manager.requires_consent(tool_name, tool_args):

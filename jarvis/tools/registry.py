@@ -147,8 +147,9 @@ class ToolRegistry:
                 "message": f"I'm not allowed to use {tool.category} tools right now — that access is turned off in your control panel.",
             }
 
+        safe_kwargs = self._redact(kwargs)
         try:
-            logger.info(f"⚡ Executing tool: {tool_name}({kwargs})")
+            logger.info(f"⚡ Executing tool: {tool_name}({safe_kwargs})")
             if inspect.iscoroutinefunction(tool.func):
                 result = await tool.func(**kwargs)
             else:
@@ -159,6 +160,15 @@ class ToolRegistry:
             logger.error(f"Tool execution failed for '{tool_name}': {e}")
             self._audit(tool_name, kwargs, "error", str(e))
             return {"status": "error", "message": f"Error running {tool_name}: {str(e)}"}
+
+    @staticmethod
+    def _redact(args: dict[str, Any]) -> dict[str, Any]:
+        """Mask secret-looking arguments before writing to application logs."""
+        try:
+            from jarvis.security.audit import redact
+            return redact(args)
+        except Exception:
+            return args
 
     @staticmethod
     def _permitted(category: str) -> bool:

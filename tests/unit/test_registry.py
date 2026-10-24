@@ -51,3 +51,27 @@ def test_permission_gate_blocks(tmp_path, monkeypatch):
         assert "not allowed" in res["message"].lower() or "turned off" in res["message"].lower()
     finally:
         permission_policy.set("code", True)
+
+
+def test_execute_redacts_sensitive_arguments_in_application_log():
+    from loguru import logger
+
+    @register_tool(name="unit_secret_tool", description="Save a secret.", category="general")
+    def unit_secret_tool(name: str, value: str, token: str) -> str:
+        return f"saved {name}"
+
+    captured_logs = []
+    handler_id = logger.add(lambda msg: captured_logs.append(str(msg)), level="INFO")
+    try:
+        secret_val = "SUPER_SECRET_VALUE_99999"
+        secret_tok = "SUPER_SECRET_TOKEN_88888"
+        res = asyncio.run(registry.execute("unit_secret_tool", name="my_api", value=secret_val, token=secret_tok))
+        assert res["status"] == "success"
+
+        log_text = "".join(captured_logs)
+        assert secret_val not in log_text, "Secret value leaked into application log!"
+        assert secret_tok not in log_text, "Secret token leaked into application log!"
+        assert "***REDACTED***" in log_text, "Expected redacted placeholder in application log"
+    finally:
+        logger.remove(handler_id)
+
