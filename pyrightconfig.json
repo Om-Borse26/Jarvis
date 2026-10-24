@@ -1,0 +1,23 @@
+{
+  "include": [
+    "jarvis",
+    "scripts",
+    "main.py"
+  ],
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    ".venv",
+    "models",
+    "data"
+  ],
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.12",
+  "pythonPlatform": "Windows",
+  "executionEnvironments": [
+    {
+      "root": "."
+    }
+  ]
+}
