@@ -7,5 +7,6 @@ Importing this package registers the vault tools into the central registry.
 from jarvis.security import vault  # noqa: F401  (registers vault tools)
 from jarvis.security import audit  # noqa: F401
 from jarvis.security import consent  # noqa: F401
+from jarvis.security import harvester  # noqa: F401  (registers credential-import tools)
 
-__all__ = ["vault", "audit", "consent"]
+__all__ = ["vault", "audit", "consent", "harvester"]

@@ -34,6 +34,7 @@ HIGH_RISK_TOOLS = {
     "send_whatsapp_message",
     "delete_secret",
     "automate_browser",
+    "import_credentials",
 }
 
 

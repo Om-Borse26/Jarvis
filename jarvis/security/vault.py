@@ -86,6 +86,21 @@ class SecretsVault:
             )
             """
         )
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS credentials (
+                service  TEXT NOT NULL,
+                username TEXT NOT NULL,
+                blob     TEXT NOT NULL,
+                url      TEXT DEFAULT '',
+                source   TEXT DEFAULT '',
+                backend  TEXT NOT NULL,
+                created  REAL NOT NULL,
+                updated  REAL NOT NULL,
+                PRIMARY KEY (service, username)
+            )
+            """
+        )
         con.commit()
         con.close()
 
@@ -196,6 +211,109 @@ class SecretsVault:
         deleted = cur.rowcount > 0
         con.close()
         return deleted
+
+    # ── Structured logins (service / username / password) ─────────────────────
+    def set_credential(
+        self, service: str, username: str, password: str,
+        url: str = "", source: str = "",
+    ) -> bool:
+        """Store or update one login. Password is encrypted at rest."""
+        service = (service or "").strip()
+        username = (username or "").strip()
+        if not service or password is None:
+            return False
+        try:
+            blob = self._encrypt(password)
+            now = time.time()
+            con = sqlite3.connect(self.db_path)
+            con.execute(
+                """
+                INSERT INTO credentials (service, username, blob, url, source, backend, created, updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(service, username) DO UPDATE SET
+                    blob=excluded.blob, url=excluded.url, source=excluded.source,
+                    backend=excluded.backend, updated=excluded.updated
+                """,
+                (service, username, blob, url, source, self._backend, now, now),
+            )
+            con.commit()
+            con.close()
+            return True
+        except Exception as e:
+            logger.error(f"[Vault] Failed to store credential for '{service}': {e}")
+            return False
+
+    def get_credential(self, service: str, username: Optional[str] = None) -> Optional[dict]:
+        """Return {service, username, password, url} for a login. In-process ONLY."""
+        service = (service or "").strip()
+        if not service:
+            return None
+        try:
+            con = sqlite3.connect(self.db_path)
+            if username:
+                row = con.execute(
+                    "SELECT service, username, blob, backend, url FROM credentials "
+                    "WHERE service = ? AND username = ?",
+                    (service, username.strip()),
+                ).fetchone()
+            else:
+                row = con.execute(
+                    "SELECT service, username, blob, backend, url FROM credentials "
+                    "WHERE service = ? OR service LIKE ? ORDER BY updated DESC LIMIT 1",
+                    (service, f"%{service}%"),
+                ).fetchone()
+            con.close()
+            if not row:
+                return None
+            return {
+                "service": row[0],
+                "username": row[1],
+                "password": self._decrypt(row[2], row[3]),
+                "url": row[4],
+            }
+        except Exception as e:
+            logger.error(f"[Vault] Failed to retrieve credential for '{service}': {e}")
+            return None
+
+    def find_credentials(self, query: str = "") -> list[dict]:
+        """Search logins by service/username. Returns metadata only — NEVER passwords."""
+        con = sqlite3.connect(self.db_path)
+        if query:
+            q = f"%{query.strip()}%"
+            rows = con.execute(
+                "SELECT service, username, url, source FROM credentials "
+                "WHERE service LIKE ? OR username LIKE ? OR url LIKE ? ORDER BY service",
+                (q, q, q),
+            ).fetchall()
+        else:
+            rows = con.execute(
+                "SELECT service, username, url, source FROM credentials ORDER BY service"
+            ).fetchall()
+        con.close()
+        return [{"service": r[0], "username": r[1], "url": r[2], "source": r[3]} for r in rows]
+
+    def count_credentials(self) -> int:
+        con = sqlite3.connect(self.db_path)
+        n = con.execute("SELECT COUNT(*) FROM credentials").fetchone()[0]
+        con.close()
+        return int(n)
+
+    def delete_credential(self, service: str, username: Optional[str] = None) -> int:
+        service = (service or "").strip()
+        if not service:
+            return 0
+        con = sqlite3.connect(self.db_path)
+        if username:
+            cur = con.execute(
+                "DELETE FROM credentials WHERE service = ? AND username = ?",
+                (service, username.strip()),
+            )
+        else:
+            cur = con.execute("DELETE FROM credentials WHERE service = ?", (service,))
+        con.commit()
+        n = cur.rowcount
+        con.close()
+        return n
 
 
 # Global singleton vault instance
