@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>J.A.R.V.I.S. — Dashboard</title>
+<style>
+  :root { --bg:#0a0e1a; --panel:rgba(255,255,255,0.05); --border:rgba(120,200,255,0.18);
+          --accent:#1e90ff; --good:#00e6b4; --text:#dce8ff; --muted:#7f93b5; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:"Segoe UI",system-ui,sans-serif; color:var(--text);
+         background: radial-gradient(1200px 600px at 20% -10%, #15213f 0%, var(--bg) 60%); min-height:100vh; }
+  header { display:flex; align-items:center; gap:14px; padding:18px 26px; border-bottom:1px solid var(--border); }
+  header .dot { width:14px; height:14px; border-radius:50%; background:var(--muted); box-shadow:0 0 12px; }
+  header .dot.idle{background:#5a6b8c;} header .dot.listening{background:var(--good);}
+  header .dot.thinking{background:#8b5cf6;} header .dot.speaking{background:var(--accent);}
+  h1 { font-size:18px; letter-spacing:3px; margin:0; font-weight:600; }
+  #statusText { color:var(--muted); font-size:13px; margin-left:auto; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:18px; padding:22px 26px; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:18px 20px;
+          backdrop-filter: blur(14px); }
+  .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:2px; color:var(--muted); margin:0 0 14px; }
+  .row { display:flex; align-items:center; justify-content:space-between; padding:9px 0; border-bottom:1px solid rgba(255,255,255,0.04); }
+  .row:last-child{border-bottom:none;}
+  .muted{color:var(--muted); font-size:12px;}
+  /* toggle */
+  .switch{position:relative; width:44px; height:24px;}
+  .switch input{opacity:0; width:0; height:0;}
+  .slider{position:absolute; inset:0; background:#2a3550; border-radius:24px; cursor:pointer; transition:.2s;}
+  .slider:before{content:""; position:absolute; height:18px; width:18px; left:3px; top:3px; background:#8aa0c8; border-radius:50%; transition:.2s;}
+  input:checked + .slider{background:var(--good);}
+  input:checked + .slider:before{transform:translateX(20px); background:#06263a;}
+  button{background:var(--accent); color:#fff; border:none; padding:9px 16px; border-radius:10px; cursor:pointer; font-size:13px;}
+  button.danger{background:#c0392b;} button.ghost{background:transparent; border:1px solid var(--border); color:var(--text);}
+  .pill{font-size:11px; padding:2px 8px; border-radius:10px; background:#1b2847; color:var(--muted);}
+  .tools{display:flex; gap:10px; flex-wrap:wrap; margin-top:6px;}
+  code{color:#9fd0ff;}
+</style>
+</head>
+<body>
+<header>
+  <div class="dot idle" id="dot"></div>
+  <h1>J.A.R.V.I.S.</h1>
+  <div id="statusText">connecting…</div>
+</header>
+
+<div class="grid">
+  <div class="card">
+    <h2>Access Control <span class="pill">you decide</span></h2>
+    <div class="muted" style="margin-bottom:10px;">Turn off any area to revoke Jarvis's access. Jarvis cannot re-enable these.</div>
+    <div id="permissions"></div>
+  </div>
+
+  <div class="card">
+    <h2>Reminders & Meetings</h2>
+    <div id="reminders"><div class="muted">No reminders.</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Recent Activity</h2>
+    <div id="history"><div class="muted">Nothing yet.</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Audit Log</h2>
+    <div id="audit"><div class="muted">No actions recorded.</div></div>
+  </div>
+
+  <div class="card">
+    <h2>System</h2>
+    <div class="row"><span>Start with Windows</span>
+      <label class="switch"><input type="checkbox" id="startup"><span class="slider"></span></label></div>
+    <div class="tools">
+      <button class="danger" id="stopBtn">Stop Jarvis</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+async function getJSON(u){ const r = await fetch(u,{cache:"no-store"}); return r.json(); }
+async function postJSON(u,b){ const r = await fetch(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)}); return r.json(); }
+
+async function pollState(){
+  try{
+    const s = await getJSON("/api/state");
+    $("dot").className = "dot " + s.state;
+    $("statusText").textContent = s.state + (s.text ? " — " + s.text : "");
+  }catch(e){ $("statusText").textContent = "offline"; }
+}
+
+async function loadPermissions(){
+  const d = await getJSON("/api/permissions");
+  const box = $("permissions"); box.innerHTML = "";
+  d.categories.forEach(cat=>{
+    const on = d.policy[cat] !== false;
+    const row = document.createElement("div"); row.className="row";
+    row.innerHTML = `<span>${cat}</span>
+      <label class="switch"><input type="checkbox" ${on?"checked":""} data-cat="${cat}">
+      <span class="slider"></span></label>`;
+    row.querySelector("input").addEventListener("change", async (e)=>{
+      await postJSON("/api/permissions",{category:cat, enabled:e.target.checked});
+    });
+    box.appendChild(row);
+  });
+}
+
+async function loadReminders(){
+  const d = await getJSON("/api/reminders");
+  const box = $("reminders");
+  if(!d.reminders.length){ box.innerHTML='<div class="muted">No reminders.</div>'; return; }
+  box.innerHTML="";
+  d.reminders.forEach(j=>{
+    const when = new Date(j.fire_at*1000).toLocaleString();
+    const row=document.createElement("div"); row.className="row";
+    row.innerHTML=`<span>${j.text} <span class="pill">${j.importance||"normal"}</span><br><span class="muted">${when}</span></span>
+      <button class="ghost" data-id="${j.id}">Cancel</button>`;
+    row.querySelector("button").addEventListener("click", async ()=>{ await postJSON("/api/reminders/cancel",{id:j.id}); loadReminders(); });
+    box.appendChild(row);
+  });
+}
+
+async function loadHistory(){
+  const d = await getJSON("/api/history");
+  const box=$("history");
+  if(!d.history.length){ box.innerHTML='<div class="muted">Nothing yet.</div>'; return; }
+  box.innerHTML = d.history.map(h=>`<div class="row"><span>${h.user_input}<br>
+    <span class="muted">${(h.tools||[]).join(", ")||"no tools"} · ${h.success?"ok":"failed"}</span></span></div>`).join("");
+}
+
+async function loadAudit(){
+  const d = await getJSON("/api/audit");
+  const box=$("audit");
+  if(!d.audit.length){ box.innerHTML='<div class="muted">No actions recorded.</div>'; return; }
+  box.innerHTML = d.audit.slice(0,20).map(a=>`<div class="row">
+    <span><code>${a.tool}</code> <span class="pill">${a.risk||"normal"}</span><br>
+    <span class="muted">${a.status}</span></span></div>`).join("");
+}
+
+async function loadStartup(){ try{ const d=await getJSON("/api/startup"); $("startup").checked=!!d.enabled; }catch(e){} }
+
+$("startup").addEventListener("change", (e)=> postJSON("/api/startup",{enabled:e.target.checked}));
+$("stopBtn").addEventListener("click", async ()=>{ if(confirm("Stop Jarvis?")){ await postJSON("/api/stop",{}); $("statusText").textContent="stopping…"; } });
+
+function refresh(){ loadReminders(); loadHistory(); loadAudit(); }
+loadPermissions(); loadStartup(); refresh();
+setInterval(pollState, 300);
+setInterval(refresh, 5000);
+pollState();
+</script>
+</body>
+</html>

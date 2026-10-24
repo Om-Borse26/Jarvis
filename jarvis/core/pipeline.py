@@ -46,6 +46,8 @@ from jarvis.memory.working import working_memory
 from jarvis.memory.episodic import episodic_memory
 from jarvis.core.scheduler import scheduler
 from jarvis.core import lifecycle
+from jarvis.ui.state import state_bridge
+from jarvis.ui.server import ControlServer
 
 
 class JarvisPipeline:
@@ -104,6 +106,11 @@ class JarvisPipeline:
         self.scheduler.speak_fn   = self._speak_async
         self.scheduler.command_fn = self._run_scheduled_command
 
+        # ── UI: state bridge + control server (orb + dashboard) ─────────
+        self._ui_server: Optional[ControlServer] = None
+        self.tts.on_speaking_start = lambda: state_bridge.set("speaking")
+        self.tts.on_speaking_stop  = lambda: state_bridge.set("idle")
+
         logger.info("JarvisPipeline initialized.")
 
     # ──────────────────────────────────────────────────────────────────
@@ -156,9 +163,12 @@ class JarvisPipeline:
         # 8. Start the system tray (background control), best-effort
         try:
             from jarvis.ui.tray import start_tray
-            start_tray(on_stop=lifecycle.request_shutdown)
+            start_tray(on_stop=lifecycle.request_shutdown, on_dashboard=self._open_dashboard)
         except Exception as e:
             logger.debug(f"[Tray] not started: {e}")
+
+        # 9. Start the UI control server + desktop orb (best-effort)
+        self._start_ui()
 
         self._running = True
         logger.success("✅ Jarvis is online and listening.")
@@ -192,6 +202,8 @@ class JarvisPipeline:
             await mcp_manager.stop_all()
         except Exception:
             pass
+        if self._ui_server:
+            self._ui_server.stop()
         lifecycle.release_single_instance()
         logger.info("Jarvis shut down.")
 
@@ -211,6 +223,7 @@ class JarvisPipeline:
 
         self._listening = True
         self._listening_timestamp = time.time()
+        state_bridge.set("listening")
         logger.info("🎙️ Listening armed via hotkey (Win+J). Jarvis is listening for 15s...")
 
     def _on_wake_mode_changed(self, enabled: bool):
@@ -240,6 +253,7 @@ class JarvisPipeline:
             self.agent_loop.cancel()
         self._listening = True
         self._listening_timestamp = time.time()
+        state_bridge.set("listening")
 
     async def _handle_screen_request(self) -> str:
         """Capture desktop screen and extract real active window, process, and OCR content."""
@@ -424,6 +438,7 @@ class JarvisPipeline:
                 pass
             working_memory.set_active_app(self._active_app)
             working_memory.start_task(text)
+            state_bridge.set("thinking", text)
 
             system_prompt, user_msg = self.arbiter.build_prompt(
                 new_user_input = text,
@@ -509,6 +524,7 @@ class JarvisPipeline:
                 success=bool(final_response) and not self._cancel_llm.is_set(),
             )
             working_memory.clear_task()
+            state_bridge.set("idle")
 
         except Exception as e:
             logger.exception(f"Pipeline error: {e}")
@@ -534,6 +550,38 @@ class JarvisPipeline:
             await mcp_manager.start_all(only=autostart)
         except Exception as e:
             logger.warning(f"[MCP] Startup notice: {e}")
+
+    def _ui_port(self) -> int:
+        return int(self._cfg.get("ui", {}).get("http_port", 8787))
+
+    def _start_ui(self):
+        """Start the control server and spawn the desktop orb (best-effort)."""
+        ui_cfg = self._cfg.get("ui", {})
+        if not ui_cfg.get("enabled", True):
+            return
+        try:
+            self._ui_server = ControlServer(self._ui_port())
+            self._ui_server.start()
+        except Exception as e:
+            logger.debug(f"[UI] server not started: {e}")
+        if ui_cfg.get("launch_orb", True):
+            try:
+                import subprocess, sys
+                py = sys.executable
+                pyw = py.replace("python.exe", "pythonw.exe")
+                exe = pyw if Path(pyw).exists() else py
+                flags = 0x08000000 if __import__("sys").platform == "win32" else 0
+                subprocess.Popen([exe, "-m", "jarvis.ui.orb"], creationflags=flags, cwd=str(Path.cwd()))
+            except Exception as e:
+                logger.debug(f"[UI] orb not launched: {e}")
+
+    def _open_dashboard(self):
+        """Open the dashboard in the default browser (from tray or voice)."""
+        try:
+            import webbrowser
+            webbrowser.open(f"http://127.0.0.1:{self._ui_port()}/")
+        except Exception as e:
+            logger.debug(f"[UI] could not open dashboard: {e}")
 
     async def _announce_eve_handoffs(self):
         """Speak any tasks/notes Eve queued from the phone, then acknowledge them."""
