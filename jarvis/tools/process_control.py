@@ -57,11 +57,9 @@ def focus_existing_window(app_query: str) -> Optional[str]:
         }
         search_terms = alias_map.get(q, [q])
 
-        target_hwnd = None
-        matched_title = ""
+        matched_hwnds = []
 
         def enum_cb(hwnd, _):
-            nonlocal target_hwnd, matched_title
             if win32gui.IsWindowVisible(hwnd):
                 title = win32gui.GetWindowText(hwnd).strip()
                 t_lower = title.lower()
@@ -70,9 +68,8 @@ def focus_existing_window(app_query: str) -> Optional[str]:
                     if term in ("visual studio code", " - code") and "antigravity" in t_lower:
                         continue
                     if term in t_lower:
-                        target_hwnd = hwnd
-                        matched_title = title
-                        return False
+                        matched_hwnds.append((hwnd, title))
+                        break
             return True
 
         try:
@@ -80,7 +77,30 @@ def focus_existing_window(app_query: str) -> Optional[str]:
         except Exception:
             pass
 
-        if target_hwnd:
+        if matched_hwnds:
+            # If multiple VS Code windows are open (e.g. 1 workspace + empty Welcome ghost windows)
+            if q in ("vscode", "vs code", "code", "vscod", "viscode") and len(matched_hwnds) > 1:
+                real_ws = [w for w in matched_hwnds if w[1] != "Welcome - Visual Studio Code"]
+                empty_ws = [w for w in matched_hwnds if w[1] == "Welcome - Visual Studio Code"]
+                if real_ws and empty_ws:
+                    for ehwnd, _ in empty_ws:
+                        try:
+                            user32.PostMessageW(ehwnd, win32con.WM_CLOSE, 0, 0)
+                        except Exception:
+                            pass
+                    target_hwnd, matched_title = real_ws[0]
+                elif empty_ws:
+                    for ehwnd, _ in empty_ws[1:]:
+                        try:
+                            user32.PostMessageW(ehwnd, win32con.WM_CLOSE, 0, 0)
+                        except Exception:
+                            pass
+                    target_hwnd, matched_title = empty_ws[0]
+                else:
+                    target_hwnd, matched_title = matched_hwnds[0]
+            else:
+                target_hwnd, matched_title = matched_hwnds[0]
+
             cur_fg = user32.GetForegroundWindow()
             cur_thread = user32.GetWindowThreadProcessId(cur_fg, None)
             my_thread = ctypes.windll.kernel32.GetCurrentThreadId()

@@ -22,12 +22,36 @@ from jarvis.tools.registry import register_tool
 def get_active_vscode_workspace() -> Optional[Path]:
     """
     Detect the active root workspace folder currently opened in Visual Studio Code.
-    Reads recent workspace records from VS Code's workspaceStorage.
+    Only returns a workspace if a VS Code window is actually running on the user's desktop!
     """
     try:
+        import ctypes
+        import win32gui
+
+        user32 = ctypes.windll.user32
+        hdesk = user32.OpenInputDesktop(0, False, 0x0100 | 0x0040)
+        if hdesk:
+            user32.SetThreadDesktop(hdesk)
+
+        # 1. Check if any VS Code window is open and get its title
+        open_titles = []
+        def cb(hwnd, _):
+            if win32gui.IsWindowVisible(hwnd):
+                title = win32gui.GetWindowText(hwnd).strip()
+                if "visual studio code" in title.lower() and "antigravity" not in title.lower():
+                    open_titles.append(title)
+            return True
+        win32gui.EnumWindows(cb, None)
+
+        # If VS Code is not open at all, there is no active workspace!
+        if not open_titles:
+            return None
+
+        # 2. Check workspaceStorage for folder matching active window title
         ws_dir = Path(os.environ.get("APPDATA", "")) / "Code" / "User" / "workspaceStorage"
         if not ws_dir.exists():
             return None
+
         entries = []
         for p in ws_dir.iterdir():
             f = p / "workspace.json"
@@ -38,16 +62,20 @@ def get_active_vscode_workspace() -> Optional[Path]:
                     pass
         if not entries:
             return None
+
         entries.sort(key=lambda x: x[0], reverse=True)
-        for _, f in entries[:10]:
+        for _, f in entries[:15]:
             try:
                 data = json.loads(f.read_text("utf-8"))
                 folder_uri = data.get("folder")
                 if folder_uri and folder_uri.startswith("file:///"):
                     raw = urllib.parse.unquote(folder_uri[8:])
                     p = Path(raw)
-                    if p.exists() and p.is_dir():
-                        return p
+                    if p.exists() and p.is_dir() and p.name != "test_dummy_dir":
+                        # Check if this folder's name appears in any of the open VS Code window titles
+                        for t in open_titles:
+                            if p.name.lower() in t.lower():
+                                return p
             except Exception:
                 pass
     except Exception as e:
@@ -204,26 +232,40 @@ def create_directory(path: str, in_vscode: bool = False) -> str:
         from jarvis.tools.process_control import focus_existing_window
 
         if in_vscode:
+            from jarvis.tools.process_control import focus_existing_window, app_resolver
+
+            # Check if VS Code is currently running
+            vscode_title = focus_existing_window("vscode")
             active_ws = get_active_vscode_workspace()
-            if active_ws and active_ws.exists():
+
+            if vscode_title and active_ws and active_ws.exists():
                 target = active_ws / clean_p
                 target.mkdir(parents=True, exist_ok=True)
-                resolved_path = str(target.resolve())
                 focus_existing_window("vscode")
-                return f"Created folder '{clean_p}' inside your active VS Code root directory ({active_ws.name}), Sir."
+                return f"Created folder '{clean_p}' inside your active VS Code workspace ({active_ws.name}), Sir."
+
+            # Either VS Code is open with empty window, or VS Code is NOT open at all
+            desktop = Path.home() / "Desktop"
+            target = desktop / clean_p
+            target.mkdir(parents=True, exist_ok=True)
+            resolved_path = str(target.resolve())
+
+            match = app_resolver.resolve("vs code")
+            exe_target = match[2] if match else "code"
+
+            if vscode_title:
+                # VS Code is open with empty window -> reuse window
+                subprocess.Popen(f'code -r "{resolved_path}"', shell=True)
+                focus_existing_window("vscode")
+                return f"Created folder '{clean_p}' on your Desktop and opened it in your active VS Code window, Sir."
             else:
-                # No active workspace was open in VS Code (e.g. empty VS Code window)
-                # Create on Desktop and open as workspace via 'code -r' (reuse open window)
-                desktop = Path.home() / "Desktop"
-                target = desktop / clean_p
-                target.mkdir(parents=True, exist_ok=True)
-                resolved_path = str(target.resolve())
-                try:
-                    subprocess.Popen(f'code -r "{resolved_path}"', shell=True)
-                except Exception:
-                    pass
+                # VS Code is NOT open -> launch VS Code directly opening this folder
+                if Path(exe_target).exists():
+                    subprocess.Popen(f'"{exe_target}" "{resolved_path}"', shell=True)
+                else:
+                    subprocess.Popen(f'code "{resolved_path}"', shell=True)
                 focus_existing_window("vscode")
-                return f"Created folder '{clean_p}' and opened it in your VS Code window, Sir."
+                return f"Created folder '{clean_p}' on your Desktop and launched VS Code with it, Sir."
 
         target = Path(clean_p)
         target.mkdir(parents=True, exist_ok=True)

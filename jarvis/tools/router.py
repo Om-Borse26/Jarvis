@@ -141,9 +141,13 @@ class ToolRouter:
             app_target = comp_match.group(1).strip()
             folder_name = comp_match.group(2) or comp_match.group(3) or "demo_folder"
             is_vscode = any(v in app_target.lower() for v in ["code", "vscode", "vs code"])
-            await registry.execute("launch_application", app_name=app_target)
-            res = await registry.execute("create_directory", path=folder_name, in_vscode=is_vscode)
-            return f"Switched to {app_target} and {res.get('result', f'created folder {folder_name}')}"
+            if is_vscode:
+                res = await registry.execute("create_directory", path=folder_name, in_vscode=True)
+                return res.get("result", f"Created folder '{folder_name}' and opened it in VS Code, Sir.")
+            else:
+                await registry.execute("launch_application", app_name=app_target)
+                res = await registry.execute("create_directory", path=folder_name)
+                return f"Switched to {app_target} and {res.get('result', f'created folder {folder_name}')}"
 
         # 1. Targeted folder creation: "create a dummy folder in the root directory of vs code that I have opened", "create a dummy folder in vs code"
         target_f = re.search(r"(?:create|make)\s+(?:a\s+)?(?:dummy\s+)?([a-zA-Z0-9_\-]+)?\s*(?:folder|directory)(?:\s+(?:called|named)\s+([a-zA-Z0-9_\-]+))?\s*(?:in|inside)\s*(?:the\s+root\s+directory\s+of\s+)?([a-zA-Z0-9_\-\.\s]+)", clean_cmd)
