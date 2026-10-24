@@ -263,8 +263,8 @@ def create_directory(path: str, in_vscode: bool = False) -> str:
                 focus_existing_window("vscode")
                 return f"Created folder '{clean_p}' on your Desktop and opened it in your active VS Code window, Sir."
             else:
-                # Fresh launch opening this folder
-                subprocess.Popen(f'code "{resolved_path}"', shell=True)
+                # Use -r so we never spawn a duplicate window if one is already open.
+                subprocess.Popen(f'code -r "{resolved_path}"', shell=True)
                 focus_existing_window("vscode")
                 return f"Created folder '{clean_p}' on your Desktop and launched VS Code with it, Sir."
 

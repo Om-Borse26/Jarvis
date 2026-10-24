@@ -227,6 +227,29 @@ class ToolRouter:
             res = await registry.execute("close_browser_tab")
             return res.get("result", "Closed the active browser tab, Sir.")
 
+        # ── Browser navigation fast-paths (operate on the user's real browser) ──
+        low = text.lower()
+        if low in ("go back", "browser back", "navigate back", "back") or re.search(r"\bgo\s+back\b", low):
+            return (await registry.execute("browser_back")).get("result", "Went back, Sir.")
+        if re.search(r"\bgo\s+forward\b", low) or low in ("go forward", "browser forward", "forward"):
+            return (await registry.execute("browser_forward")).get("result", "Went forward, Sir.")
+        if re.search(r"\b(refresh|reload)\b.*\b(page|tab|browser)\b", low) or low in ("refresh", "reload", "refresh the page", "reload the page"):
+            return (await registry.execute("browser_refresh")).get("result", "Refreshed the page, Sir.")
+        if re.search(r"(?:reopen|restore|bring back)\s+(?:the\s+)?(?:last\s+)?(?:closed\s+)?tab", low):
+            return (await registry.execute("reopen_closed_tab")).get("result", "Reopened the last closed tab, Sir.")
+        if re.search(r"\b(?:next|switch)\s+tab\b", low) or low == "next tab":
+            return (await registry.execute("switch_browser_tab", direction="next")).get("result", "Switched tab, Sir.")
+        if re.search(r"\bprevious\s+tab\b|\bprev\s+tab\b", low):
+            return (await registry.execute("switch_browser_tab", direction="previous")).get("result", "Switched tab, Sir.")
+        if re.search(r"\bzoom\s+in\b", low):
+            return (await registry.execute("browser_zoom", level="in")).get("result", "Zoomed in, Sir.")
+        if re.search(r"\bzoom\s+out\b", low):
+            return (await registry.execute("browser_zoom", level="out")).get("result", "Zoomed out, Sir.")
+        if re.search(r"(?:scroll)\s+(?:the\s+page\s+)?down", low):
+            return (await registry.execute("browser_scroll", direction="down")).get("result", "Scrolled down, Sir.")
+        if re.search(r"(?:scroll)\s+(?:the\s+page\s+)?up", low):
+            return (await registry.execute("browser_scroll", direction="up")).get("result", "Scrolled up, Sir.")
+
         clean_for_ch = re.sub(r"\s+(?:in|on)\s+(?:a\s+)?(?:new\s+tab|new\s+window|another\s+tab|another\s+window)", "", clean_for_ch, flags=re.IGNORECASE).strip()
 
         had_channel_kw = "channel" in clean_for_ch.lower()

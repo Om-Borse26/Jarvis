@@ -5,54 +5,112 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Jarvis Orb</title>
 <style>
+  :root {
+    --c-idle-1:#2bd4ff; --c-idle-2:#1e6bff;
+    --c-listen-1:#43ffce; --c-listen-2:#00c6a7;
+    --c-think-1:#c59bff; --c-think-2:#7b3cff;
+    --c-speak-1:#7fe3ff; --c-speak-2:#1e90ff;
+  }
   html, body {
-    margin: 0; padding: 0; width: 100%; height: 100%;
-    background: transparent; overflow: hidden;
-    display: flex; align-items: center; justify-content: center;
-    -webkit-user-select: none; user-select: none;
-    font-family: "Segoe UI", system-ui, sans-serif;
+    margin:0; padding:0; width:100%; height:100%;
+    background:transparent; overflow:hidden;
+    display:flex; align-items:center; justify-content:center;
+    -webkit-user-select:none; user-select:none;
+    font-family:"Segoe UI", system-ui, sans-serif;
   }
-  .orb {
-    position: relative; width: 120px; height: 120px; border-radius: 50%;
-    background: radial-gradient(circle at 35% 30%, #8fd4ff, #1e90ff 55%, #0b3d91 100%);
-    box-shadow: 0 0 30px 6px rgba(30,144,255,0.55), inset 0 0 20px rgba(255,255,255,0.35);
-    transition: transform .25s ease, box-shadow .3s ease, filter .3s ease;
-    animation: breathe 4s ease-in-out infinite;
-  }
-  .ring {
-    position: absolute; inset: -14px; border-radius: 50%;
-    border: 2px solid rgba(120,200,255,0.5); opacity: 0;
-    transition: opacity .3s ease;
-  }
-  /* States */
-  .idle .orb      { filter: saturate(.8) brightness(.9); }
-  .listening .orb { box-shadow: 0 0 40px 10px rgba(0,230,180,0.7), inset 0 0 20px rgba(255,255,255,.4);
-                    background: radial-gradient(circle at 35% 30%, #a9ffe6, #00e6b4 55%, #00866a 100%); }
-  .listening .ring { opacity: 1; animation: pulse 1.1s ease-out infinite; }
-  .thinking .orb  { animation: spin 1.6s linear infinite, breathe 4s ease-in-out infinite;
-                    background: radial-gradient(circle at 35% 30%, #d7c3ff, #8b5cf6 55%, #4c1d95 100%);
-                    box-shadow: 0 0 40px 10px rgba(139,92,246,0.7), inset 0 0 20px rgba(255,255,255,.35); }
-  .speaking .orb  { background: radial-gradient(circle at 35% 30%, #cfe8ff, #1e90ff 55%, #0b3d91 100%); }
-  .speaking .ring { opacity: 1; animation: pulse .55s ease-out infinite; }
+  .scene { position:relative; width:240px; height:240px; display:flex; align-items:center; justify-content:center; }
 
-  @keyframes breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.06); } }
-  @keyframes spin    { to { transform: rotate(360deg); } }
-  @keyframes pulse   { 0% { transform: scale(1); opacity:.8; } 100% { transform: scale(1.5); opacity:0; } }
+  .orb-wrap {
+    position:relative; width:120px; height:120px;
+    display:flex; align-items:center; justify-content:center;
+    transition:transform .5s cubic-bezier(.22,1,.36,1), filter .4s ease;
+    animation:breathe 5s ease-in-out infinite;
+  }
+
+  /* Soft outer glow halo */
+  .halo {
+    position:absolute; inset:-55px; border-radius:50%;
+    background:radial-gradient(circle, var(--g1) 0%, transparent 62%);
+    opacity:.55; filter:blur(10px); transition:opacity .4s ease, background .5s ease;
+  }
+
+  /* Rotating aurora rings */
+  .ring { position:absolute; border-radius:50%; inset:-10px;
+    background:conic-gradient(from 0deg, transparent, var(--g1), transparent, var(--g2), transparent);
+    filter:blur(6px); opacity:.65; mix-blend-mode:screen; }
+  .ring1 { animation:spin 7s linear infinite; }
+  .ring2 { inset:-22px; opacity:.4; animation:spin 11s linear infinite reverse; }
+
+  /* The glassy core sphere */
+  .core {
+    position:relative; width:120px; height:120px; border-radius:50%;
+    background:radial-gradient(circle at 36% 30%, rgba(255,255,255,.18) 0%, transparent 35%),
+               radial-gradient(circle at 50% 50%, var(--g1) 0%, var(--g2) 58%, #06112e 100%);
+    box-shadow:0 0 34px 8px var(--glow), inset 0 0 26px rgba(255,255,255,.28),
+               inset 0 -14px 24px rgba(0,0,0,.45);
+    transition:box-shadow .4s ease, background .5s ease;
+  }
+  .sheen {
+    position:absolute; top:14%; left:22%; width:46%; height:34%; border-radius:50%;
+    background:radial-gradient(circle at 40% 40%, rgba(255,255,255,.75), transparent 70%);
+    filter:blur(2px); opacity:.8;
+  }
+
+  /* Emanating ripples (speaking / listening) */
+  .pulse { position:absolute; width:120px; height:120px; border-radius:50%;
+    border:2px solid var(--g1); opacity:0; }
 
   .caption {
-    position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
-    max-width: 180px; text-align: center; font-size: 11px; color: #cfe8ff;
-    text-shadow: 0 1px 4px #000; white-space: nowrap; overflow: hidden;
-    text-overflow: ellipsis; opacity: .9;
+    position:absolute; bottom:14px; left:50%; transform:translateX(-50%);
+    max-width:210px; text-align:center; font-size:11px; letter-spacing:.3px;
+    color:#dbeeff; text-shadow:0 1px 6px #000, 0 0 10px var(--glow);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; opacity:.92;
   }
+
+  /* ── State palettes (set CSS vars) ───────────────────────────── */
+  body.idle      { --g1:var(--c-idle-1);   --g2:var(--c-idle-2);   --glow:rgba(43,150,255,.55); }
+  body.listening { --g1:var(--c-listen-1); --g2:var(--c-listen-2); --glow:rgba(0,230,180,.75); }
+  body.thinking  { --g1:var(--c-think-1);  --g2:var(--c-think-2);  --glow:rgba(139,92,246,.75); }
+  body.speaking  { --g1:var(--c-speak-1);  --g2:var(--c-speak-2);  --glow:rgba(30,144,255,.8); }
+
+  /* ── State behaviours ────────────────────────────────────────── */
+  body.idle      .orb-wrap { transform:scale(.92); filter:saturate(.85) brightness(.92); }
+  body.idle      .ring     { animation-duration:16s, 22s; opacity:.3; }
+
+  body.listening .orb-wrap { transform:scale(1.02); }
+  body.listening .pulse    { animation:ripple 1.5s ease-out infinite; }
+
+  body.thinking  .ring1    { animation-duration:1.8s; opacity:.85; }
+  body.thinking  .ring2    { animation-duration:3s; opacity:.6; }
+
+  body.speaking  .orb-wrap { animation:speakPulse .5s ease-in-out infinite; }
+  body.speaking  .pulse    { animation:ripple .9s ease-out infinite; }
+  body.speaking  .pulse2   { animation-delay:.45s; }
+
+  @keyframes breathe   { 0%,100% { transform:scale(1); } 50% { transform:scale(1.05); } }
+  @keyframes speakPulse{ 0%,100% { transform:scale(1.0); } 50% { transform:scale(1.12); } }
+  @keyframes spin      { to { transform:rotate(360deg); } }
+  @keyframes ripple    { 0% { transform:scale(1); opacity:.7; } 100% { transform:scale(1.85); opacity:0; } }
 </style>
 </head>
 <body class="idle">
-  <div class="ring"></div>
-  <div class="orb"></div>
-  <div class="caption" id="caption"></div>
+  <div class="scene">
+    <div class="orb-wrap">
+      <div class="halo"></div>
+      <div class="ring ring1"></div>
+      <div class="ring ring2"></div>
+      <div class="pulse"></div>
+      <div class="pulse pulse2"></div>
+      <div class="core"><div class="sheen"></div></div>
+    </div>
+    <div class="caption" id="caption"></div>
+  </div>
 <script>
   const STATES = ["idle", "listening", "thinking", "speaking"];
+  // Allow ?state=speaking for offline visual previews.
+  const forced = new URLSearchParams(location.search).get("state");
+  if (forced && STATES.includes(forced)) document.body.className = forced;
+
   async function poll() {
     try {
       const r = await fetch("/api/state", { cache: "no-store" });
@@ -62,8 +120,7 @@
       cap.textContent = (s.state === "idle") ? "" : (s.text || s.state);
     } catch (e) { /* server not ready */ }
   }
-  setInterval(poll, 180);
-  poll();
+  if (!forced) { setInterval(poll, 180); poll(); }
 </script>
 </body>
 </html>

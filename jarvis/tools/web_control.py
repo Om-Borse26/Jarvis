@@ -144,6 +144,170 @@ def close_browser_tab() -> str:
         return f"I couldn't close the tab: {e}"
 
 
+def _browser_action(combos: list, confirm: str) -> str:
+    """Focus the active browser, send one or more key combos, return a confirmation."""
+    try:
+        import pyautogui
+        import time
+        pyautogui.FAILSAFE = False
+        if not _focus_active_browser():
+            return "I couldn't find an open browser window, Sir."
+        for combo in combos:
+            pyautogui.hotkey(*combo)
+            time.sleep(0.05)
+        return confirm
+    except Exception as e:
+        logger.error(f"browser action failed: {e}")
+        return f"I couldn't do that in the browser: {e}"
+
+
+@register_tool(
+    name="browser_new_tab",
+    description="Open a NEW browser tab, optionally navigating to a URL. Use only when the user explicitly wants a new tab.",
+    category="web"
+)
+def browser_new_tab(url: str = "") -> str:
+    """Open a new tab in the user's browser, optionally at a URL."""
+    try:
+        import pyautogui
+        import pyperclip
+        import time
+        pyautogui.FAILSAFE = False
+        if not _focus_active_browser():
+            return "I couldn't find an open browser window, Sir."
+        pyautogui.hotkey("ctrl", "t")
+        time.sleep(0.15)
+        u = url.strip()
+        if u:
+            if not u.startswith(("http://", "https://")):
+                u = "https://" + u
+            pyperclip.copy(u)
+            pyautogui.hotkey("ctrl", "v")
+            time.sleep(0.05)
+            pyautogui.press("enter")
+            return f"Opened a new tab at {u}, Sir."
+        return "Opened a new browser tab, Sir."
+    except Exception as e:
+        logger.error(f"browser_new_tab failed: {e}")
+        return f"I couldn't open a new tab: {e}"
+
+
+@register_tool(
+    name="reopen_closed_tab",
+    description="Reopen the most recently closed browser tab (Ctrl+Shift+T).",
+    category="web"
+)
+def reopen_closed_tab() -> str:
+    return _browser_action([("ctrl", "shift", "t")], "Reopened the last closed tab, Sir.")
+
+
+@register_tool(
+    name="switch_browser_tab",
+    description="Switch to the next or previous browser tab. direction: 'next' or 'previous'.",
+    category="web"
+)
+def switch_browser_tab(direction: str = "next") -> str:
+    if direction.lower().startswith("prev"):
+        return _browser_action([("ctrl", "shift", "tab")], "Switched to the previous tab, Sir.")
+    return _browser_action([("ctrl", "tab")], "Switched to the next tab, Sir.")
+
+
+@register_tool(
+    name="browser_back",
+    description="Go back to the previous page in the browser.",
+    category="web"
+)
+def browser_back() -> str:
+    return _browser_action([("alt", "left")], "Went back, Sir.")
+
+
+@register_tool(
+    name="browser_forward",
+    description="Go forward to the next page in the browser.",
+    category="web"
+)
+def browser_forward() -> str:
+    return _browser_action([("alt", "right")], "Went forward, Sir.")
+
+
+@register_tool(
+    name="browser_refresh",
+    description="Reload/refresh the current browser page.",
+    category="web"
+)
+def browser_refresh() -> str:
+    return _browser_action([("ctrl", "r")], "Refreshed the page, Sir.")
+
+
+@register_tool(
+    name="browser_zoom",
+    description="Zoom the current browser page. level: 'in', 'out', or 'reset'.",
+    category="web"
+)
+def browser_zoom(level: str = "in") -> str:
+    lv = level.lower()
+    if lv.startswith("out"):
+        return _browser_action([("ctrl", "-")], "Zoomed out, Sir.")
+    if lv.startswith("reset") or lv == "0":
+        return _browser_action([("ctrl", "0")], "Reset the zoom, Sir.")
+    return _browser_action([("ctrl", "=")], "Zoomed in, Sir.")
+
+
+@register_tool(
+    name="close_browser_window",
+    description="Close the entire current browser window (all its tabs).",
+    category="web"
+)
+def close_browser_window() -> str:
+    return _browser_action([("ctrl", "shift", "w")], "Closed the browser window, Sir.")
+
+
+@register_tool(
+    name="browser_scroll",
+    description="Scroll the current browser page. direction: 'up' or 'down'. amount is the number of scroll steps.",
+    category="web"
+)
+def browser_scroll(direction: str = "down", amount: int = 4) -> str:
+    try:
+        import pyautogui
+        import time
+        pyautogui.FAILSAFE = False
+        if not _focus_active_browser():
+            return "I couldn't find an open browser window, Sir."
+        time.sleep(0.1)
+        step = 400 * max(1, int(amount))
+        pyautogui.scroll(step if direction.lower().startswith("up") else -step)
+        return f"Scrolled {direction.lower()}, Sir."
+    except Exception as e:
+        logger.error(f"browser_scroll failed: {e}")
+        return f"I couldn't scroll: {e}"
+
+
+@register_tool(
+    name="find_on_page",
+    description="Find text on the current browser page (Ctrl+F) and jump to the first match.",
+    category="web"
+)
+def find_on_page(query: str) -> str:
+    try:
+        import pyautogui
+        import pyperclip
+        import time
+        pyautogui.FAILSAFE = False
+        if not _focus_active_browser():
+            return "I couldn't find an open browser window, Sir."
+        pyautogui.hotkey("ctrl", "f")
+        time.sleep(0.15)
+        pyperclip.copy(query)
+        pyautogui.hotkey("ctrl", "v")
+        time.sleep(0.05)
+        pyautogui.press("enter")
+        return f"Searching the page for '{query}', Sir."
+    except Exception as e:
+        logger.error(f"find_on_page failed: {e}")
+        return f"I couldn't search the page: {e}"
+
+
 @register_tool(
     name="search_youtube",
     description="Search YouTube for videos and open results in browser. Reuses existing browser tab unless force_new or new_tab is requested.",

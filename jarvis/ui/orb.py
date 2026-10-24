@@ -14,8 +14,8 @@ import time
 
 from loguru import logger
 
-_WIDTH = 160
-_HEIGHT = 160
+_WIDTH = 240
+_HEIGHT = 240
 
 
 def _ui_port() -> int:
