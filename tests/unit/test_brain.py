@@ -33,8 +33,68 @@ def test_parse_agent_final():
     assert "done" in d.response_text.lower()
 
 
+def test_normalize_text_json_tool_call():
+    result = OllamaClient._normalize_tool_response({"message": {
+        "content": '{"name":"open_dashboard","arguments":{}}'
+    }})
+    assert result == {"content": "", "tool_calls": [{"name": "open_dashboard", "arguments": {}}]}
+
+
+def test_normalize_fenced_tool_call():
+    result = OllamaClient._normalize_tool_response({"message": {
+        "content": '```json\n{"function":{"name":"set_reminder","arguments":{"text":"stretch","when":"in 1 minute"}}}\n```'
+    }})
+    assert result["content"] == ""
+    assert result["tool_calls"][0]["name"] == "set_reminder"
+
+
+def test_malformed_text_call_is_not_spoken_or_executed():
+    result = OllamaClient._normalize_tool_response({"message": {
+        "content": '{"name":"execute_shell","arguments":'
+    }})
+    assert result["tool_calls"] == []
+    assert "rephrase" in result["content"]
+
+
 def test_parse_agent_tool_call():
     d = parse_agent_decision('TOOL_CALL: set_volume({"percent": 80})')
     assert not d.is_final
     assert d.tool_name == "set_volume"
     assert d.tool_args == {"percent": 80}
+
+
+def test_agent_executes_all_seeded_calls_and_observes_results(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from jarvis.core.agent_loop import AgentLoop, registry
+
+    execute = AsyncMock(return_value={"status": "success", "result": "Verified result"})
+    monkeypatch.setattr(registry, "execute", execute)
+    llm = SimpleNamespace(chat_with_tools=AsyncMock(return_value={
+        "content": "Both tasks are complete.", "tool_calls": []
+    }))
+    result = asyncio.run(AgentLoop(llm).run("two tasks", seed_tool_calls=[
+        {"name": "open_dashboard", "arguments": {}},
+        {"name": "list_mcp_servers", "arguments": {}},
+    ]))
+    assert result == "Both tasks are complete."
+    assert [call.args[0] for call in execute.await_args_list] == ["open_dashboard", "list_mcp_servers"]
+    messages = llm.chat_with_tools.call_args.kwargs["messages"]
+    assert len([message for message in messages if message["role"] == "tool"]) == 2
+
+
+def test_text_call_reaches_agent_execution(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from jarvis.core.agent_loop import AgentLoop, registry
+
+    decision = OllamaClient._normalize_tool_response({"message": {
+        "content": '{"name":"open_dashboard","arguments":{}}'
+    }})
+    execute = AsyncMock(return_value={"status": "success", "result": "Opening your dashboard."})
+    monkeypatch.setattr(registry, "execute", execute)
+    llm = SimpleNamespace(chat_with_tools=AsyncMock(return_value={"content": "Opened.", "tool_calls": []}))
+    asyncio.run(AgentLoop(llm).run("open dashboard", seed_tool_calls=decision["tool_calls"]))
+    execute.assert_awaited_once_with("open_dashboard")

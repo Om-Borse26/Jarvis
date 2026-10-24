@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Jarvis HUD</title>
 <style>
-  html, body { margin:0; padding:0; width:100%; height:100%; background:transparent; overflow:hidden;
+  html, body { margin:0; padding:0; width:100%; height:100%; background:#10182c; overflow:hidden;
     font-family:"Segoe UI",system-ui,sans-serif; -webkit-user-select:none; user-select:none; }
   #stack { position:absolute; top:12px; right:12px; display:flex; flex-direction:column; gap:10px; align-items:flex-end; }
   .toast {
@@ -39,7 +39,11 @@
   async function getJSON(u){ const r=await fetch(u,{cache:"no-store"}); return r.json(); }
   async function postJSON(u,b){ await fetch(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)}); }
 
+  let previous = "";
   function render(data){
+    const serialized = JSON.stringify(data);
+    if (serialized === previous) return;
+    previous = serialized;
     const stack = document.getElementById("stack");
     stack.innerHTML = "";
     if (data.confirmation) {

@@ -201,6 +201,7 @@ class AgentLoop:
         conversation_history: Optional[list] = None,
         system_prompt: Optional[str] = None,
         seed_tool_call: Optional[dict] = None,
+        seed_tool_calls: Optional[list] = None,
     ) -> str:
         """
         Execute a user request through the iterative ReAct loop using native
@@ -236,7 +237,7 @@ class AgentLoop:
 
         logger.info(f"🤖 Agent loop started for: '{user_request[:100]}'")
 
-        pending_seed = seed_tool_call
+        pending_calls = list(seed_tool_calls or ([seed_tool_call] if seed_tool_call else []))
 
         for iteration in range(1, self.MAX_ITERATIONS + 1):
             if self._cancel_event.is_set():
@@ -244,18 +245,18 @@ class AgentLoop:
                 return "Operation cancelled."
 
             # ── 1. Decide next action ────────────────────────────────────
-            if pending_seed and iteration == 1:
+            if pending_calls:
                 content = ""
-                tool_calls = [pending_seed]
-                pending_seed = None
+                tool_calls = [pending_calls.pop(0)]
             else:
                 decision = await self.llm.chat_with_tools(
                     messages=messages,
-                    tools=tools,
+                    tools=registry.get_tools_schema(),
                     cancel_event=self._cancel_event,
                 )
                 content = decision["content"]
                 tool_calls = decision["tool_calls"]
+                pending_calls.extend(tool_calls[1:])
 
                 # Fallback: model emitted the legacy "TOOL_CALL:" text format.
                 if not tool_calls and content and "TOOL_CALL:" in content:
@@ -268,7 +269,7 @@ class AgentLoop:
             if not tool_calls:
                 final = re.sub(r"[*#_`~]", "", content or "").strip()
                 if not final:
-                    final = "Task completed." if observations else "I'm not sure how to help with that."
+                    final = "I couldn't confirm completion. Please tell me how you'd like to proceed."
                 logger.success(f"✅ Agent loop completed in {iteration} iteration(s): {final[:100]}")
                 return final
 

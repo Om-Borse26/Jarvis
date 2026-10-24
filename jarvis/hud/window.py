@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import threading
 import time
+import sys
 
 from loguru import logger
 
@@ -31,7 +32,6 @@ def _set_click_through(enable: bool) -> None:
         if not hwnd:
             return
         style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
-        style |= win32con.WS_EX_LAYERED | win32con.WS_EX_TOPMOST
         if enable:
             style |= win32con.WS_EX_TRANSPARENT
         else:
@@ -41,16 +41,21 @@ def _set_click_through(enable: bool) -> None:
         pass
 
 
-def _watch(port: int) -> None:
+def _watch(port: int, window) -> None:
     """Allow clicks only while a confirmation is showing; otherwise pass through."""
     import json
     import urllib.request
     last = None
+    visible = False
     while True:
         try:
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/hud", timeout=2) as r:
                 data = json.loads(r.read().decode("utf-8"))
             interactive = data.get("confirmation") is not None
+            should_show = interactive or bool(data.get("notifications"))
+            if should_show != visible:
+                window.show() if should_show else window.hide()
+                visible = should_show
             if interactive != last:
                 _set_click_through(enable=not interactive)
                 last = interactive
@@ -74,20 +79,20 @@ def run() -> None:
     except Exception:
         width, height = 1280, 800
 
-    webview.create_window(
+    window = webview.create_window(
         "Jarvis HUD",
         url=f"http://127.0.0.1:{port}/hud",
         width=400,
-        height=height - 100,
+        height=240,
         x=width - 420,
         y=20,
         frameless=True,
         on_top=True,
-        transparent=True,
-        background_color="#000000",
+        hidden=True,
+        resizable=False,
+        background_color="#10182c",
     )
-    threading.Thread(target=lambda: (time.sleep(1.2), _watch(port)), daemon=True).start()
-    webview.start()
+    webview.start(lambda: _watch(port, window), gui="edgechromium" if sys.platform == "win32" else None)
 
 
 if __name__ == "__main__":

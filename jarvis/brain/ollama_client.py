@@ -175,7 +175,7 @@ class OllamaClient:
         cancel_event: Optional[asyncio.Event] = None,
         temperature: float = 0.4,
         num_predict: int = 512,
-        num_ctx: int = 8192,
+        num_ctx: int = 4096,
     ) -> dict:
         """
         Single-shot chat using Ollama's native function-calling.
@@ -197,7 +197,7 @@ class OllamaClient:
             model = self.route_model(last_user)
 
         try:
-            resp = await self._client.chat(
+            resp = await asyncio.wait_for(self._client.chat(
                 model      = model,
                 messages   = messages,
                 tools      = tools,
@@ -210,13 +210,13 @@ class OllamaClient:
                     "num_predict": num_predict,
                 },
                 think      = False,
-            )
+            ), timeout=self._timeout)
         except ollama.ResponseError as e:
             logger.error(f"Ollama tool-call error: {e}")
             return {"content": f"I encountered an error: {e}", "tool_calls": []}
         except Exception as e:
             logger.error(f"Ollama tool-call failure: {e}")
-            return {"content": "", "tool_calls": []}
+            return {"content": "I couldn't get a response from the local model in time. Please try again.", "tool_calls": []}
 
         if cancel_event and cancel_event.is_set():
             return {"content": "", "tool_calls": []}
@@ -257,6 +257,32 @@ class OllamaClient:
         # Strip stray reasoning tags the model may leak into content.
         if content:
             content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+
+        if not tool_calls and content:
+            candidate = content.strip()
+            if candidate.startswith("<tool_call>"):
+                candidate = re.sub(r"^<tool_call>\s*|\s*</tool_call>$", "", candidate).strip()
+            if candidate.startswith("```"):
+                candidate = re.sub(r"^```(?:json)?\s*|\s*```$", "", candidate).strip()
+            if candidate.startswith(("{", "[")):
+                try:
+                    payload = json.loads(candidate)
+                    calls = payload if isinstance(payload, list) else payload.get("tool_calls", [payload])
+                    for call in calls:
+                        function = call.get("function", call)
+                        name = function.get("name")
+                        arguments = function.get("arguments", {})
+                        if isinstance(arguments, str):
+                            arguments = json.loads(arguments)
+                        if not isinstance(name, str) or not name or not isinstance(arguments, dict):
+                            raise ValueError("Invalid tool call")
+                        tool_calls.append({"name": name, "arguments": arguments})
+                    if not tool_calls:
+                        raise ValueError("Empty tool calls")
+                    content = ""
+                except (ValueError, TypeError, AttributeError):
+                    tool_calls = []
+                    content = "I couldn't interpret that action safely. Please rephrase your request."
 
         return {"content": content, "tool_calls": tool_calls}
 

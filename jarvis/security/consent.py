@@ -71,6 +71,7 @@ class ConsentManager:
         self.speak_fn: Optional[Callable[[str], Awaitable]] = None
         self.arm_fn: Optional[Callable[[], None]] = None
         self.hud_fn: Optional[Callable[[str], None]] = None   # show a visual confirmation card
+        self.clear_hud_fn: Optional[Callable[[], None]] = None
         self._loop = None                                     # event loop for thread-safe resolve
 
     # ── State ─────────────────────────────────────────────────────────────────
@@ -116,6 +117,8 @@ class ConsentManager:
         finally:
             self._pending = None
             self._pending_desc = ""
+            if self.clear_hud_fn:
+                self.clear_hud_fn()
 
         logger.info(f"[Consent] Decision: {'approved' if approved else 'declined'}.")
         return approved

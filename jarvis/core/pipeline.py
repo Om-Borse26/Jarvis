@@ -105,6 +105,7 @@ class JarvisPipeline:
         from jarvis.hud.manager import hud_manager
         self.hud = hud_manager
         self.consent.hud_fn = self.hud.request_confirmation
+        self.consent.clear_hud_fn = self.hud.clear_confirmation
         self.hud.on_confirm_response = self.consent.resolve_threadsafe
 
         # ── Proactivity scheduler (reminders / recurring tasks) ─────────
@@ -470,6 +471,13 @@ class JarvisPipeline:
             )
             # Inject tiered-memory context: live state (L2) + related past (L3).
             system_prompt += self._build_memory_context(text)
+            system_prompt += (
+                "\nUse native function calls for actions, never read tool schemas aloud. "
+                "Do not claim an action succeeded without a successful tool result. "
+                "If the target, content, or required information is unclear, ask one concise "
+                "clarifying question and wait. For example, ask for the topic before writing "
+                "an unspecified essay. 'Your dashboard' means the Jarvis dashboard."
+            )
 
             # ── 4. Single tool-aware decision (native function calling) ──
             # One LLM call decides: speak conversationally OR invoke a tool.
@@ -503,7 +511,7 @@ class JarvisPipeline:
                     mood                 = mood_state.mood,
                     conversation_history = self._conversation_history,
                     system_prompt        = system_prompt,
-                    seed_tool_call       = decision["tool_calls"][0],
+                    seed_tool_calls      = decision["tool_calls"],
                 )
                 if final_response and not self._cancel_llm.is_set():
                     logger.info(f"🤖 Jarvis: {final_response}")

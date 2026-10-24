@@ -64,6 +64,7 @@ def parse_when(when: str) -> Optional[Dict[str, Any]]:
     if not when:
         return None
     t = when.strip().lower()
+    t = re.sub(r"\b(?:a|an|one)\s+(second|minute|hour|day)\b", r"1 \1", t)
     now = time.time()
 
     # Recurring: "every N minutes/hours", "every hour", "every day/morning/..."
@@ -71,6 +72,8 @@ def parse_when(when: str) -> Optional[Dict[str, Any]]:
         m = re.search(r"every\s+(\d+)\s*(second|sec|minute|min|hour|day)s?", t)
         if m:
             interval = int(m.group(1)) * _UNIT_SECONDS[m.group(2)]
+            if interval <= 0:
+                return None
             return {"kind": "recurring", "fire_at": now + interval, "interval": interval}
         for word, hour in _TIME_OF_DAY.items():
             if word in t:
@@ -86,6 +89,8 @@ def parse_when(when: str) -> Optional[Dict[str, Any]]:
     m = re.search(r"in\s+(\d+)\s*(second|sec|minute|min|hour|day)s?", t)
     if m:
         delta = int(m.group(1)) * _UNIT_SECONDS[m.group(2)]
+        if delta <= 0:
+            return None
         return {"kind": "once", "fire_at": now + delta, "interval": None}
 
     # One-shot absolute: "tomorrow at 9am", "at 3pm", "15:30"

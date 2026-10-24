@@ -26,3 +26,14 @@ def test_describe_includes_target():
     d = ConsentManager.describe("delete_directory", {"path": "demo"})
     assert "demo" in d
     assert "delete" in d.lower()
+
+
+def test_timeout_clears_visual_confirmation():
+    import asyncio
+    from unittest.mock import Mock
+
+    manager = ConsentManager(timeout=0.001)
+    manager.clear_hud_fn = Mock()
+    assert asyncio.run(manager.request("Disposable test")) is False
+    manager.clear_hud_fn.assert_called_once_with()
+    assert not manager.is_pending()

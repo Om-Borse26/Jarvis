@@ -35,7 +35,6 @@ def _make_click_through(enable: bool) -> None:
         if not hwnd:
             return
         style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
-        style |= win32con.WS_EX_LAYERED | win32con.WS_EX_TOPMOST
         if enable:
             style |= win32con.WS_EX_TRANSPARENT  # clicks pass through
         else:
@@ -83,21 +82,25 @@ def run() -> None:
         frameless=True,
         easy_drag=True,
         on_top=True,
-        transparent=True,
-        background_color="#000000",
+        resizable=False,
+        background_color="#0a0e1a",
     )
 
     def _position():
-        time.sleep(1.0)
         try:
             if screen:
                 window.move(screen.width - _WIDTH - 30, screen.height - _HEIGHT - 80)
+            import win32gui
+            hwnd = int(window.native.Handle.ToInt64())
+            left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+            region = win32gui.CreateEllipticRgn(0, 0, right - left, bottom - top)
+            win32gui.SetWindowRgn(hwnd, region, True)
         except Exception:
             pass
         threading.Thread(target=_watch_state_for_clickthrough, args=(port,), daemon=True).start()
 
-    threading.Thread(target=_position, daemon=True).start()
-    webview.start()
+    window.events.loaded += _position
+    webview.start(gui="edgechromium" if sys.platform == "win32" else None)
 
 
 if __name__ == "__main__":

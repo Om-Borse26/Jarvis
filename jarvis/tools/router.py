@@ -35,6 +35,27 @@ class ToolRouter:
         text = re.sub(r"\s+", " ", norm_text.lower().strip().rstrip(".!?"))
         clean_cmd = re.sub(r"\s+", " ", SpeechNormalizer.clean_command(text).lower())
 
+        if re.match(r"^(?:did|have|has|was|were)\s", text):
+            return None
+        youtube = re.fullmatch(
+            r"(?:can you |could you |please )?open youtube and search(?: for)? (?:some )?(.+)", text
+        )
+        if youtube:
+            result = await registry.execute("search_youtube", query=youtube.group(1))
+            return result.get("result", result.get("message"))
+        if re.search(r"\b(?:and|then|also)\b", text):
+            return None
+        instant = {
+            "open dashboard": "open_dashboard", "open the dashboard": "open_dashboard",
+            "bring up the dashboard": "open_dashboard", "bring up your dashboard": "open_dashboard",
+            "turn yourself off": "stop_jarvis", "shut yourself down": "stop_jarvis",
+            "list mcp servers": "list_mcp_servers", "list the mcp servers": "list_mcp_servers",
+        }
+        command = re.sub(r"^(?:can you |could you |please )", "", text)
+        if command in instant:
+            result = await registry.execute(instant[command])
+            return result.get("result", result.get("message"))
+
         # ── Audio & Volume Controls ───────────────────────────────────────
         # 1. Absolute volume: "laptop's volume to 90%", "turn volume up to 90", "volume 80"
         vol_match = re.search(r"(?:volume|sound|audio|laptop.*?volume).*?(\d{1,3})\s*(?:%|percent)?", text)

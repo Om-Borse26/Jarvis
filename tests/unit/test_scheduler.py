@@ -10,6 +10,15 @@ def test_parse_relative():
     assert 590 < (p["fire_at"] - time.time()) < 610
 
 
+def test_parse_spoken_minute():
+    parsed = parse_when("in a minute")
+    assert 59 < parsed["fire_at"] - time.time() <= 60
+
+
+def test_zero_interval_is_rejected():
+    assert parse_when("every 0 minutes") is None
+
+
 def test_parse_recurring_every_hours():
     p = parse_when("every 2 hours")
     assert p["kind"] == "recurring"
