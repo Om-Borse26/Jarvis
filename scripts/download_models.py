@@ -38,23 +38,26 @@ def download_whisper():
 
 def download_kokoro():
     logger.info("📥 Downloading Kokoro-82M TTS model...")
-    from huggingface_hub import hf_hub_download
+    import urllib.request
+    import shutil
 
     kokoro_dir = MODELS / "kokoro"
     kokoro_dir.mkdir(parents=True, exist_ok=True)
 
+    base_url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
     files = ["kokoro-v1.0.onnx", "voices-v1.0.bin"]
+
     for fname in files:
         path = kokoro_dir / fname
-        if path.exists():
+        if path.exists() and path.stat().st_size > 1000:
             logger.info(f"  ↳ {fname} already exists, skipping.")
             continue
         logger.info(f"  ↳ Downloading {fname}...")
-        hf_hub_download(
-            repo_id   = "hexgrad/Kokoro-82M",
-            filename  = fname,
-            local_dir = str(kokoro_dir),
-        )
+        url = f"{base_url}/{fname}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req) as resp, open(path, "wb") as out_file:
+            shutil.copyfileobj(resp, out_file)
+        logger.success(f"  ✅ {fname} downloaded ({path.stat().st_size // (1024*1024)} MB).")
     logger.success("✅ Kokoro-82M downloaded.")
 
 
