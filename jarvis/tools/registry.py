@@ -138,6 +138,15 @@ class ToolRegistry:
         if not tool:
             return {"status": "error", "message": f"Tool '{tool_name}' not found in registry."}
 
+        # User-owned permission gate: hard-block disabled tool categories.
+        if not self._permitted(tool.category):
+            logger.warning(f"🚫 Blocked '{tool_name}': category '{tool.category}' disabled by user.")
+            self._audit(tool_name, kwargs, "blocked", "category disabled by user")
+            return {
+                "status": "error",
+                "message": f"I'm not allowed to use {tool.category} tools right now — that access is turned off in your control panel.",
+            }
+
         try:
             logger.info(f"⚡ Executing tool: {tool_name}({kwargs})")
             if inspect.iscoroutinefunction(tool.func):
@@ -150,6 +159,15 @@ class ToolRegistry:
             logger.error(f"Tool execution failed for '{tool_name}': {e}")
             self._audit(tool_name, kwargs, "error", str(e))
             return {"status": "error", "message": f"Error running {tool_name}: {str(e)}"}
+
+    @staticmethod
+    def _permitted(category: str) -> bool:
+        """Check the user's permission policy (best-effort; default allow)."""
+        try:
+            from jarvis.core.permissions import permission_policy
+            return permission_policy.is_allowed(category)
+        except Exception:
+            return True
 
     @staticmethod
     def _audit(tool_name: str, args: dict, status: str, result: str) -> None:

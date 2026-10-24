@@ -38,7 +38,8 @@ from jarvis import memory as memory_layers  # noqa: F401  (L2/L3/L4 + episodic t
 
 # ── Proactivity: reminders & recurring tasks ─────────────────────────────────
 from jarvis.core import scheduler as scheduler_tools  # noqa: F401  (registers scheduler tools)
-
+# ── Lifecycle: single-instance + self-shutdown ────────────────────────
+from jarvis.core import lifecycle as lifecycle_tools  # noqa: F401  (registers stop_jarvis)
 # ── Security: encrypted secrets vault + audit tools ──────────────────────────
 from jarvis import security  # noqa: F401  (registers vault tools)
 

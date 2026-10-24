@@ -45,6 +45,7 @@ from jarvis.tools.mcp_runtime import mcp_manager
 from jarvis.memory.working import working_memory
 from jarvis.memory.episodic import episodic_memory
 from jarvis.core.scheduler import scheduler
+from jarvis.core import lifecycle
 
 
 class JarvisPipeline:
@@ -152,6 +153,13 @@ class JarvisPipeline:
         # 7. Start the proactivity scheduler (reminders, recurring tasks)
         self.scheduler.start()
 
+        # 8. Start the system tray (background control), best-effort
+        try:
+            from jarvis.ui.tray import start_tray
+            start_tray(on_stop=lifecycle.request_shutdown)
+        except Exception as e:
+            logger.debug(f"[Tray] not started: {e}")
+
         self._running = True
         logger.success("✅ Jarvis is online and listening.")
 
@@ -168,7 +176,7 @@ class JarvisPipeline:
 
         # 6. Main event loop — keeps process alive
         try:
-            while self._running:
+            while self._running and not lifecycle.shutdown_requested():
                 await asyncio.sleep(0.1)
         except asyncio.CancelledError:
             pass
@@ -184,6 +192,7 @@ class JarvisPipeline:
             await mcp_manager.stop_all()
         except Exception:
             pass
+        lifecycle.release_single_instance()
         logger.info("Jarvis shut down.")
 
     # ──────────────────────────────────────────────────────────────────

@@ -47,6 +47,11 @@ logger.add(
 
 
 async def main():
+    from jarvis.core.lifecycle import acquire_single_instance
+    if not acquire_single_instance():
+        logger.error("Jarvis is already running. Exiting this instance.")
+        return
+
     from jarvis.core.pipeline import JarvisPipeline
 
     pipeline = JarvisPipeline()
