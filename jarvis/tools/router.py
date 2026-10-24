@@ -29,13 +29,17 @@ class ToolRouter:
         """
         text = utterance.lower().strip().rstrip(".!?")
 
-        # ── Audio Controls ────────────────────────────────────────────────
-        # "set volume to 50", "volume 75", "turn volume up to 80"
-        vol_match = re.search(r"(?:set\s+)?volume(?:\s+to)?\s+(\d+)", text)
+        # ── Audio & Volume Controls ───────────────────────────────────────
+        # Matches: "increase volume to 90%", "laptop's volume to 90%", "turn volume up to 90",
+        # "set sound to 90", "make volume 90", "volume 90", "sound 80 percent"
+        vol_match = re.search(r"(?:volume|sound|audio|laptop.*?volume).*?(\d{1,3})\s*(?:%|percent)?", text)
+        if not vol_match:
+            vol_match = re.search(r"(?:increase|decrease|turn|make|set|put).*?(?:to|at)\s+(\d{1,3})\s*(?:%|percent)?", text)
         if vol_match:
             val = int(vol_match.group(1))
-            res = await registry.execute("set_volume", percent=val)
-            return res.get("result", f"Volume set to {val} percent.")
+            if 0 <= val <= 100:
+                res = await registry.execute("set_volume", percent=val)
+                return res.get("result", f"Master volume set to {val} percent, Sir.")
 
         if text in ("mute", "mute audio", "mute volume", "mute the sound"):
             res = await registry.execute("mute_volume")

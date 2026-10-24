@@ -11,6 +11,7 @@ from jarvis.tools import gui_control
 from jarvis.tools import file_control
 from jarvis.tools import shell_control
 from jarvis.tools import web_control
+from jarvis.tools import browser_tool
 
 # Auto-discover plugins dynamically from jarvis/tools/plugins/
 PLUGINS_DIR = Path(__file__).parent / "plugins"

@@ -18,10 +18,32 @@ from jarvis.tools.registry import register_tool
 
 # Common executable aliases for rapid launching
 APP_ALIASES = {
+    "vscode": [
+        r"C:\Users\ombor\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Visual Studio Code.lnk",
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe"),
+        r"C:\Program Files\Microsoft VS Code\Code.exe",
+    ],
+    "vs code": [
+        r"C:\Users\ombor\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Visual Studio Code.lnk",
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe"),
+    ],
+    "visual studio code": [
+        r"C:\Users\ombor\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Visual Studio Code.lnk",
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe"),
+    ],
+    "code": [
+        r"C:\Users\ombor\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Visual Studio Code.lnk",
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe"),
+    ],
     "brave": [
+        r"C:\Users\ombor\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Brave.lnk",
         r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
         r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
         os.path.expandvars(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\Application\brave.exe"),
+    ],
+    "brave browser": [
+        r"C:\Users\ombor\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Brave.lnk",
+        r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
     ],
     "chrome": [
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
@@ -36,13 +58,8 @@ APP_ALIASES = {
     "discord": [
         os.path.expandvars(r"%LOCALAPPDATA%\Discord\Update.exe --processStart Discord.exe"),
     ],
-    "vscode": [
-        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe"),
-        r"C:\Program Files\Microsoft VS Code\Code.exe",
-    ],
-    "code": [
-        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe"),
-    ],
+    "whatsapp": ["cmd /c start whatsapp:"],
+    "whats app": ["cmd /c start whatsapp:"],
     "notepad": ["notepad.exe"],
     "calc": ["calc.exe"],
     "calculator": ["calc.exe"],
@@ -56,25 +73,68 @@ APP_ALIASES = {
 }
 
 
-@register_tool(name="launch_application", description="Launch an application by name (e.g. brave, blender, vscode, discord, notepad).", category="process")
-def launch_application(app_name: str) -> str:
-    """Launch an application by name."""
-    clean = app_name.lower().strip()
-    cmd = None
+def _find_start_menu_shortcut(app_name: str) -> Optional[Path]:
+    """Scan Windows Start Menu and Desktop for installed .lnk shortcuts."""
+    clean = app_name.lower().replace(" ", "").replace("-", "").replace("_", "")
+    alias_map = {
+        "vscode": "visualstudiocode",
+        "vs": "visualstudiocode",
+        "code": "visualstudiocode",
+        "chrome": "googlechrome",
+        "edge": "microsoftedge",
+    }
+    target = alias_map.get(clean, clean)
 
+    search_dirs = [
+        Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs",
+        Path("C:/ProgramData/Microsoft/Windows/Start Menu/Programs"),
+        Path.home() / "Desktop",
+    ]
+    for d in search_dirs:
+        if not d.exists():
+            continue
+        try:
+            for lnk in d.rglob("*.lnk"):
+                stem = lnk.stem.lower().replace(" ", "").replace("-", "").replace("_", "")
+                if target in stem or stem in target:
+                    return lnk
+        except Exception:
+            continue
+    return None
+
+
+@register_tool(name="launch_application", description="Launch an application by name (e.g. vs code, brave, blender, discord, notepad, whatsapp).", category="process")
+def launch_application(app_name: str) -> str:
+    """Launch an application by name using exact paths, shortcuts, or system shell."""
+    clean = app_name.lower().strip()
+
+    # 1. Check known aliases
     if clean in APP_ALIASES:
         for candidate in APP_ALIASES[clean]:
+            if candidate.startswith("cmd /c"):
+                subprocess.Popen(candidate, shell=True)
+                return f"Opening {app_name}, Sir."
             parts = candidate.split(" ")
             exe = parts[0]
             if Path(exe).exists() or shutil.which(exe):
-                cmd = candidate
-                break
+                if exe.endswith(".lnk"):
+                    os.startfile(exe)
+                else:
+                    subprocess.Popen(candidate, shell=True)
+                return f"Opening {app_name}, Sir."
 
-    if not cmd:
-        cmd = f'start "" "{clean}"'
+    # 2. Check dynamic Start Menu and Desktop shortcuts
+    shortcut = _find_start_menu_shortcut(clean)
+    if shortcut and shortcut.exists():
+        try:
+            os.startfile(str(shortcut))
+            return f"Opening {shortcut.stem}, Sir."
+        except Exception as e:
+            logger.warning(f"Could not start shortcut {shortcut}: {e}")
 
+    # 3. Fallback to Windows shell start
     try:
-        subprocess.Popen(cmd, shell=True)
+        subprocess.Popen(f'start "" "{clean}"', shell=True)
         return f"Opening {app_name}, Sir."
     except Exception as e:
         return f"Failed to launch {app_name}: {e}"

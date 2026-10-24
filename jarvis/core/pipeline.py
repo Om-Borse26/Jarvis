@@ -32,6 +32,7 @@ from jarvis.brain.ollama_client import OllamaClient
 from jarvis.core.arbiter  import SteerArbiter
 from jarvis.core.config   import load_config
 from jarvis.tools.screen_tool import ScreenTool
+from jarvis.audio.speaker_id import speaker_id
 import jarvis.tools  # Automatically registers all tools & plugins
 from jarvis.tools.registry import registry
 from jarvis.tools.router   import ToolRouter
@@ -55,9 +56,11 @@ class JarvisPipeline:
         self.arbiter     = SteerArbiter(self.tts, self.llm)
         self.screen_tool = ScreenTool()
         self.tool_router = ToolRouter()
+        self.speaker_id  = speaker_id
         self.vad         = VADListener(
             on_speech_segment=self._on_speech_segment,
             is_speaking_fn=lambda: self.tts.is_speaking,
+            speaker_verifier_fn=lambda audio: self.speaker_id.verify(audio, threshold=0.62)[0] if self.speaker_id._enrolled_speakers else True,
         )
         self.trigger = TriggerSystem(
             on_trigger=self._on_trigger_fired,
@@ -282,6 +285,27 @@ class JarvisPipeline:
             # Consume the active armed token for this command
             self._listening = False
             logger.info(f"👤 User: {text}")
+
+            # ── Speaker Verification & Voice Enrollment ───────────────────
+            clean_lower = text.lower().strip().rstrip(".!?")
+            if any(k in clean_lower for k in ["enroll my voice", "register my voice", "remember my voice", "save my voice"]):
+                logger.info("🎙️ Enrolling user voiceprint...")
+                enrolled = self.speaker_id.enroll(self._user_name, audio)
+                if enrolled:
+                    resp = f"Voiceprint recorded successfully, {self._user_name}. I will now only follow and respond to your voice."
+                else:
+                    resp = f"I could not capture a clear voice sample, {self._user_name}. Please try speaking a slightly longer sentence."
+                await self._speak_async(resp)
+                self._listening = True
+                self._listening_timestamp = time.time()
+                return
+
+            if self.speaker_id._enrolled_speakers:
+                is_auth, sim, name = self.speaker_id.verify(audio, threshold=0.66)
+                if not is_auth:
+                    logger.warning(f"🛡️ Speech ignored: Unrecognized voice (similarity={sim:.2f} < 0.66). Authorized only for {self._user_name}.")
+                    return
+                logger.debug(f"👤 Verified speaker: {name} (similarity={sim:.2f})")
 
             # ── 1. Fast-path intent check (< 1ms instant OS execution) ────
             fast_resp = await self.tool_router.try_fast_path(text)

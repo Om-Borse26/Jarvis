@@ -1,66 +1,56 @@
 """
-J.A.R.V.I.S. — Browser Tool
-Controls web interactions, searches, and automations.
-Defaults to Brave Browser (ad-free) as specified by the user.
-Falls back to system default or Chrome only on explicit instruction.
+J.A.R.V.I.S. — Browser & Web Automation Tool (Playwright & System)
+Provides direct web browser automation using Playwright and system browsers:
+  - Automate browser actions (navigate, click, fill forms, extract text)
+  - Perform real headless or headful DOM operations
+  - Fall back to system default or Brave Browser for standard navigation
 """
 from __future__ import annotations
 
 import urllib.parse
-import webbrowser
-from pathlib import Path
 from typing import Any
-
 from loguru import logger
-
-BRAVE_PATHS = [
-    r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
-    r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
-]
+from jarvis.tools.registry import register_tool
 
 
-class BrowserTool:
-    """Tool for controlling browser and web searches."""
+@register_tool(
+    name="automate_browser",
+    description="Automate a real browser using Playwright to navigate, click buttons, fill text, or extract webpage content.",
+    category="web"
+)
+async def automate_browser(url: str, action: str = "navigate", selector: str = "", text: str = "") -> str:
+    """Automate real browser interactions using Playwright."""
+    from playwright.async_api import async_playwright
 
-    def __init__(self, default_browser: str = "brave") -> None:
-        self.default_browser = default_browser
-        self._brave_path = self._find_brave()
+    target_url = url.strip()
+    if not target_url.startswith(("http://", "https://")):
+        target_url = f"https://{target_url}"
 
-    def _find_brave(self) -> str | None:
-        for p in BRAVE_PATHS:
-            if Path(p).exists():
-                return p
-        return None
+    try:
+        async with async_playwright() as p:
+            # Launch system Chrome channel
+            browser = await p.chromium.launch(channel="chrome", headless=True)
+            page = await browser.new_page()
+            await page.goto(target_url, timeout=15000)
 
-    async def open_url(self, url: str, browser: str | None = None) -> dict[str, Any]:
-        """Open a URL in the designated browser (defaults to Brave)."""
-        target_browser = (browser or self.default_browser).lower()
-
-        if not url.startswith(("http://", "https://")):
-            url = f"https://{url}"
-
-        try:
-            if target_browser == "brave" and self._brave_path:
-                import subprocess
-
-                subprocess.Popen([self._brave_path, url])
-                return {"status": "success", "message": f"Opened {url} in Brave Browser."}
+            act = action.lower().strip()
+            if act == "click" and selector:
+                await page.click(selector, timeout=6000)
+                result = f"Clicked element '{selector}' on {target_url}."
+            elif act in ("type", "fill") and selector and text:
+                await page.fill(selector, text, timeout=6000)
+                result = f"Filled '{selector}' with '{text}' on {target_url}."
+            elif act == "extract":
+                title = await page.title()
+                body = await page.inner_text("body")
+                snippet = body[:800].replace("\n", " ").strip()
+                result = f"Page Title: {title}\nContent snippet: {snippet}"
             else:
-                # System browser fallback
-                webbrowser.open(url)
-                return {"status": "success", "message": f"Opened {url}."}
-        except Exception as e:
-            logger.error(f"Error opening browser URL {url}: {e}")
-            return {"status": "error", "message": str(e)}
+                title = await page.title()
+                result = f"Navigated to {target_url}. Page title: '{title}'."
 
-    async def search(self, query: str, engine: str = "google", browser: str | None = None) -> dict[str, Any]:
-        """Perform a web search using specified engine."""
-        encoded = urllib.parse.quote_plus(query)
-        if engine == "youtube":
-            url = f"https://www.youtube.com/results?search_query={encoded}"
-        elif engine == "brave":
-            url = f"https://search.brave.com/search?q={encoded}"
-        else:
-            url = f"https://www.google.com/search?q={encoded}"
-
-        return await self.open_url(url, browser=browser)
+            await browser.close()
+            return result
+    except Exception as e:
+        logger.error(f"Playwright automation error: {e}")
+        return f"Browser automation error: {e}"

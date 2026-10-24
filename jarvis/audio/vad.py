@@ -45,6 +45,7 @@ class VADListener:
         self,
         on_speech_segment: Callable[[np.ndarray], None],
         is_speaking_fn: Optional[Callable[[], bool]] = None,
+        speaker_verifier_fn: Optional[Callable[[np.ndarray], bool]] = None,
     ):
         """
         Args:
@@ -52,10 +53,12 @@ class VADListener:
                                when a complete speech segment is detected.
             is_speaking_fn: Optional callable returning True while Jarvis is speaking,
                             used to suppress acoustic echo from laptop speakers.
+            speaker_verifier_fn: Optional callable to verify if audio matches enrolled user voiceprint.
         """
-        self._callback       = on_speech_segment
-        self._is_speaking_fn = is_speaking_fn
-        self._cfg            = load_config()
+        self._callback            = on_speech_segment
+        self._is_speaking_fn      = is_speaking_fn
+        self._speaker_verifier_fn = speaker_verifier_fn
+        self._cfg                 = load_config()
         self._threshold      = max(0.6, float(self._cfg["audio"]["vad_threshold"]))
         self._device_idx     = self._cfg["audio"]["input_device_index"]
 
@@ -176,12 +179,20 @@ class VADListener:
                         prob = self._model(tensor, self.SAMPLE_RATE).item()
                         rms = float(np.sqrt(np.mean(audio ** 2)))
 
-                        # Genuine user voice interruption: sustained loud speech (>= 0.14 RMS over speaker bleed)
+                        # Check speaker verification if voiceprints are enrolled
+                        voice_verified = True
+                        if self._speaker_verifier_fn:
+                            try:
+                                voice_verified = self._speaker_verifier_fn(audio)
+                            except Exception:
+                                voice_verified = True
+
+                        # Genuine user voice interruption: verified voice + sustained loud speech (>= 0.14 RMS over speaker bleed)
                         # across at least 3 consecutive chunks (~100ms)
-                        if prob >= 0.90 and rms >= 0.14:
+                        if voice_verified and prob >= 0.90 and rms >= 0.14:
                             self._consecutive_barge_chunks += 1
                             if self._consecutive_barge_chunks >= 3:
-                                logger.info(f"🛑 Voice barge-in detected (prob={prob:.2f}, rms={rms:.3f})! Halting speech...")
+                                logger.info(f"🛑 Verified voice barge-in detected (prob={prob:.2f}, rms={rms:.3f})! Halting speech...")
                                 self._last_barge_in_time = now
                                 self._consecutive_barge_chunks = 0
                                 self._on_barge_in()
