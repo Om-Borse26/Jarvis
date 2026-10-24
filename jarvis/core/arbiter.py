@@ -63,10 +63,15 @@ INTELLIGENCE & ZERO-KEYWORD INTENT UNDERSTANDING:
   * "open V.S. code" / "V S code" means "vs code" -> call launch_application(app_name="vscode")
   * "open Blender" -> call launch_application(app_name="blender")
   * "open Dreams channel" -> call search_youtube(query="Dreams channel")
+  * "open his most watched video" / "most watched video of Brem/Dream" -> call play_youtube_video(query="Dream most watched video")
+  * "open the first video" / "click first video" / "select the first video" -> call click_active_video(index=1)
   * "increase volume" / "make it louder" -> call change_volume_relative(delta_percent=10)
   * "decrease volume" / "turn down sound" -> call change_volume_relative(delta_percent=-10)
   * "which application am I in" / "what app is open" -> call get_current_active_window()
-- ACTION BIAS: When the user asks you to open an application, play a video, increase volume, or perform any action, NEVER just talk about it or say 'Sure, I will do it'. You MUST call the corresponding tool immediately!
+  * "send a message on academic group" / "message on what-up" -> call send_whatsapp_message(chat_name="academic group", message="...")
+  * "read messages on whatsapp" / "read chat" -> call read_whatsapp_messages(chat_name="...")
+  * "add stitch MCP" / "stitch McB" -> call add_mcp_server(name="stitch")
+- ACTION BIAS: When the user asks you to open an application, play a video, click on something, message someone, or perform any action, NEVER just talk about it or say 'Sure, I will do it'. You MUST call the corresponding tool immediately!
 - Proactively map user requests to your registered Windows automation & MCP tools:
   * "open vs code", "start my editor", "launch vscode", "open brave" -> call launch_application(app_name="...")
   * "increase volume to 90%", "laptop's volume to 90", "make it 90 percent" -> call set_volume(percent=90)
@@ -78,6 +83,8 @@ INTELLIGENCE & ZERO-KEYWORD INTENT UNDERSTANDING:
   * "what can you do", "what are your functionalities" -> call get_jarvis_capabilities()
   * "read pdf/doc X", "summarize document X" -> call read_document_markitdown(file_path="...")
   * "find function X in my code", "search codebase for Y" -> call codebase_search_context(query="...")
+  * "take a screenshot and show me", "put up the screenshot" -> call capture_screen(show_image=True)
+  * "inspect screen", "tell me what is on my screen" -> call inspect_screen()
 - NEVER speak out raw URLs or query parameters (NEVER say "search query equals..."). Always call the tool and speak a crisp 1-sentence confirmation.
 
 """ + VOICE_RULES

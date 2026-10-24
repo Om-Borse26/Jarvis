@@ -175,12 +175,7 @@ class DynamicAppResolver:
         """Find best application match and launch it."""
         match = self.resolve(query)
         if not match:
-            # Last-ditch shell start
-            try:
-                subprocess.Popen(f'start "" "{query}"', shell=True)
-                return f"Attempting to launch {query}, Sir."
-            except Exception as e:
-                return f"Could not find or launch application '{query}': {e}"
+            return f"I could not find an application matching '{query}' installed on your PC, Sir."
 
         score, name, target, source = match
         try:

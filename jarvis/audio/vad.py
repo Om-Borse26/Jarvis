@@ -36,10 +36,10 @@ class VADListener:
     CHUNK_SAMPLES   = int(SAMPLE_RATE * CHUNK_MS / 1000)  # 512 samples
 
     # Timing parameters
-    SPEECH_PAD_MS       = 250   # Pad before/after speech for natural capture
+    SPEECH_PAD_MS       = 400   # Pad before/after speech for natural capture
     MIN_SPEECH_MS       = 200   # Ignore very short bursts (<200ms) — noise
-    MAX_SILENCE_MS      = 380   # Stop collecting after 380ms silence for snappy response
-    PRE_SPEECH_BUFFER_MS= 200   # Rolling buffer before speech onset
+    MAX_SILENCE_MS      = 1300  # Allow natural 1.3s pauses so user can finish full thoughts without cutoff
+    PRE_SPEECH_BUFFER_MS= 350   # Rolling buffer before speech onset
 
     def __init__(
         self,

@@ -12,28 +12,39 @@ from loguru import logger
 # Common homophone and acoustic misrecognition mappings
 HOMOPHONE_MAP = [
     # Mail vs Male
-    (r"\b(compose|send|write|create|draft|check|read|open)\s+(?:a\s+)?male\b", r"\1 a mail"),
-    (r"\b(new|incoming|unread|my)\s+male\b", r"\1 mail"),
-    (r"\bwant\s+to\s+compose\s+(?:a\s+)?male\b", "want to compose a mail"),
+    # Mail vs Male / Meal
+    (r"\b(compose|send|write|create|draft|check|read|open)\s+(?:a\s+)?(?:male|meal)\b", r"\1 a mail"),
+    (r"\b(new|incoming|unread|my)\s+(?:male|meal)\b", r"\1 mail"),
+    (r"\bwant\s+to\s+compose\s+(?:a\s+)?(?:male|meal)\b", "want to compose a mail"),
+
+    # WhatsApp acoustic variations ("what-up group", "wassup")
+    (r"\b(?:what[\s\-_]*up|what[\s\-_]*app|wassup)\b", "whatsapp"),
 
     # VS Code / IDE acronyms
     (r"\b(?:v\.s\.|v\.\s*s\.|v\s+s|we\s+s)\s*code\b", "vs code"),
     (r"\bv\s*s\s*code\b", "vs code"),
     (r"\bvisual\s+studio\s+code\b", "vs code"),
+    (r"\b(?:now\s+)?try\s+opening\b", "open"),
+    (r"\bdo\s+one\s+thing[,\s]+", ""),
 
     # URL / Web slips
     (r"\b(?:the|this)\s+u\.s\.\b", "the URL"),
     (r"\bu\.s\.\s+(?:is|was)\s+(?:wrong|invalid)\b", "URL is wrong"),
 
+    # WhatsApp homophones
+    (r"\b(?:what-up|what\s+up|wassup|wat\s*app|whats\s*app)\b", "whatsapp"),
+
     # Assistant name variations
     (r"\b(?:jarvvis|javis|jarves|jarviz|jarvus)\b", "jarvis"),
 
-    # YouTube & Media
+    # YouTube, Creators & Media
+    (r"\bbrem\b", "dream"),
     (r"\bdreams?\s+channel\b", "Dream channel on youtube"),
     (r"\bmine\s*craft\b", "minecraft"),
     (r"\byou\s*tube\b", "youtube"),
 
-    # Software & Tools
+    # MCPs, Software & Tools
+    (r"\bstitch\s+(?:mcb|mcbb|mcibb|m\s*c\s*b)\b", "stitch mcp"),
     (r"\banti[\s\-_]*gravity\b", "antigravity"),
     (r"\bplay\s*wright\b", "playwright"),
     (r"\bpower\s*shell\b", "powershell"),
@@ -42,6 +53,8 @@ HOMOPHONE_MAP = [
 # Conversational prefix and suffix wrappers
 WRAPPER_PREFIXES = [
     r"^(?:hey\s+|hi\s+|hello\s+)?(?:jarvis[,\s]+)?",
+    r"^(?:do\s+one\s+thing[,\s]+)?",
+    r"^(?:now\s+try\s+|try\s+(?:to\s+)?|now\s+can\s+you\s+)",
     r"^(?:can\s+you\s+|could\s+you\s+|would\s+you\s+|will\s+you\s+)(?:please\s+)?(?:just\s+)?",
     r"^(?:then\s+you\s+|and\s+then\s+|now\s+you\s+|so\s+you\s+)",
     r"^(?:i\s+want\s+(?:you\s+to\s+|to\s+)?|i\s+need\s+(?:you\s+to\s+|to\s+)?|please\s+)",
@@ -75,7 +88,13 @@ class SpeechNormalizer:
         for pat in WRAPPER_PREFIXES:
             cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE).strip()
 
-        # Strip polite suffixes
+        # Strip conversational trailing questions & polite suffixes
+        cleaned = re.sub(
+            r"[\.,]?\s*(?:can\s+you\s+(?:do\s+that|do\s+this|help\s+me)(?:\s+or\s+not)?|is\s+that\s+possible|do\s+that\s+for\s+me)\??$",
+            "",
+            cleaned,
+            flags=re.IGNORECASE
+        ).strip()
         cleaned = re.sub(r"(?:\s+for\s+me|\s+please|\s+now|\s+right\s+now)$", "", cleaned, flags=re.IGNORECASE).strip()
 
         return cleaned

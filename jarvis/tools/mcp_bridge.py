@@ -161,3 +161,44 @@ def list_mcp_servers() -> str:
     if not servers:
         return "No external MCP servers configured."
     return f"Configured MCP servers on your system: {', '.join(servers)}."
+
+
+@register_tool(name="add_mcp_server", description="Add and configure a new MCP server in the workspace (e.g. 'stitch', 'figma', 'blender', 'github').", category="mcp")
+def add_mcp_server(name: str, command: str = "npx", args: str = "") -> str:
+    """Add a new MCP server configuration to config/mcp_servers.json."""
+    clean_name = name.lower().strip().replace(" ", "-").replace("_", "-")
+    clean_name = clean_name.replace("-mcp", "").replace("mcb", "").strip("-")
+
+    if "stitch" in clean_name:
+        cmd = "npx"
+        arg_list = ["-y", "@stitch/mcp"]
+    elif "github" in clean_name:
+        cmd = "npx"
+        arg_list = ["-y", "@modelcontextprotocol/server-github"]
+    elif "figma" in clean_name:
+        cmd = "npx"
+        arg_list = ["-y", "figma-mcp"]
+    else:
+        cmd = command or "npx"
+        arg_list = args.split() if isinstance(args, str) and args.strip() else ["-y", f"{clean_name}-mcp"]
+
+    try:
+        data = {}
+        if CONFIG_PATH.exists():
+            data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        if "mcpServers" not in data:
+            data["mcpServers"] = {}
+
+        data["mcpServers"][clean_name] = {
+            "command": cmd,
+            "args": arg_list,
+            "description": f"{name.title()} MCP integration for AI assistance"
+        }
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CONFIG_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        mcp_bridge.load_config()
+        return f"Successfully added {name} MCP server to your workspace configuration, Sir."
+    except Exception as e:
+        logger.error(f"Failed to add MCP server: {e}")
+        return f"Failed to add MCP server '{name}': {e}"
+

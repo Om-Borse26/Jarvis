@@ -13,6 +13,7 @@ from jarvis.tools import shell_control
 from jarvis.tools import web_control
 from jarvis.tools import browser_tool
 from jarvis.tools import mcp_bridge
+from jarvis.tools import whatsapp_control
 from jarvis.core import memory
 
 # Auto-discover plugins dynamically from jarvis/tools/plugins/

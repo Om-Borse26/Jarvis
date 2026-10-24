@@ -135,7 +135,29 @@ class ToolRouter:
             return res.get("result")
 
         # ── YouTube Channels & Videos ─────────────────────────────────────
-        # "open dreams channel", "open dream channel on youtube", "go to dreams channel"
+        # 1. Video Click / Selection: "open the first video", "play the first video", "click first video", "select the second video"
+        vid_click = re.search(r"(?:open|play|click|select|watch)\s+(?:the\s+)?(first|second|third|fourth|1st|2nd|3rd|4th|\d+)\s+video", text)
+        if not vid_click:
+            vid_click = re.search(r"(?:open|play|click|select|watch)\s+(?:the\s+)?(first|second|third|fourth|1st|2nd|3rd|4th|\d+)\s+video", clean_cmd)
+        if vid_click:
+            idx_map = {"first": 1, "1st": 1, "second": 2, "2nd": 2, "third": 3, "3rd": 3, "fourth": 4, "4th": 4}
+            raw_idx = vid_click.group(1).lower()
+            idx = idx_map.get(raw_idx, 1)
+            res = await registry.execute("click_active_video", index=idx)
+            return res.get("result", f"Selecting and playing video #{idx}, Sir.")
+
+        # 2. Most watched video: "open his most watched video", "can you open the most watched video of Brem"
+        mw_match = re.search(r"(?:open|play|watch)\s+(?:his|the|her|their)?\s*(?:most\s+watched|most\s+popular|top)\s+video(?:\s+(?:of|by|from|for)\s+(.+))?", text)
+        if mw_match:
+            target = mw_match.group(1)
+            if not target or not target.strip():
+                target = "Dream"
+            target = target.strip().rstrip(".!?")
+            search_q = f"{target} most watched video"
+            res = await registry.execute("play_youtube_video", query=search_q)
+            return res.get("result", f"Playing {search_q} on YouTube, Sir.")
+
+        # 3. Channel searches: "open dreams channel", "open dream channel on youtube", "go to dreams channel"
         ch_match = re.search(r"(?:open|search|go\s+to|show\s+me)\s+(?:up\s+)?(.+?)\s+(?:channel(?:\s+on\s+youtube)?|on\s+youtube)", text)
         if ch_match:
             ch_name = ch_match.group(1).strip()
@@ -167,6 +189,47 @@ class ToolRouter:
                     res = await registry.execute("search_youtube", query=search_q)
                     return res.get("result", f"Opening {search_q} on YouTube, Sir.")
 
+        # ── WhatsApp Messaging & Management ──────────────────────────────
+        # "send a message on academic group", "I want to send a message on a whatsapp group"
+        wa_match = re.search(r"(?:send\s+(?:a\s+)?message\s+(?:to|on)\s+)(?:a\s+|the\s+)?([a-zA-Z0-9_\-\s]+?)(?:\s+saying\s+(.+))?$", clean_cmd)
+        if wa_match:
+            chat = wa_match.group(1).strip()
+            msg = wa_match.group(2) or ""
+            if chat.lower() in ("whatsapp", "whatsapp group", "what-up", "what up", "group"):
+                from jarvis.tools.whatsapp_control import _focus_whatsapp
+                _focus_whatsapp()
+                return "I have opened WhatsApp, Sir. Which contact or group would you like to message?"
+            else:
+                res = await registry.execute("send_whatsapp_message", chat_name=chat, message=msg)
+                return res.get("result")
+
+        if any(wq in text or wq in clean_cmd for wq in ["open whatsapp", "launch whatsapp", "start whatsapp", "switch to whatsapp"]):
+            res = await registry.execute("open_whatsapp_chat", chat_name="")
+            return "Opening WhatsApp for you, Sir."
+
+        # "read messages on academic group", "read whatsapp messages"
+        wa_read = re.search(r"(?:read|check|summarize)\s+(?:my\s+|the\s+)?(?:messages|chat)\s*(?:on|in|from)?\s*([a-zA-Z0-9_\-\s]*)", clean_cmd)
+        if wa_read and ("whatsapp" in text or "message" in text or "chat" in text):
+            target_chat = wa_read.group(1).strip().replace("whatsapp", "").strip()
+            res = await registry.execute("read_whatsapp_messages", chat_name=target_chat)
+            return res.get("result")
+
+        # ── MCP Server Dynamic Addition ───────────────────────────────────
+        # "add stitch mcp", "add stitch mcb", "can you add stitch mcp in this workspace"
+        mcp_add_match = re.search(r"(?:add|install|configure)\s+([a-zA-Z0-9_\-]+)\s+(?:mcp|mcb)(?:\s+server)?", text)
+        if mcp_add_match:
+            server_name = mcp_add_match.group(1).strip()
+            res = await registry.execute("add_mcp_server", name=server_name)
+            return res.get("result")
+
+        # ── Screenshot & Display ──────────────────────────────────────────
+        if any(sq in text for sq in [
+            "take a screenshot and show me", "take a screenshot and put it up",
+            "put up the screenshot", "show me a screenshot", "show screenshot", "capture screen and show"
+        ]):
+            res = await registry.execute("capture_screen", show_image=True)
+            return res.get("result")
+
         web_patterns = [
             r"(?:search\s+(?:google|web|the\s+web)\s+(?:for\s+)?)(.+)",
             r"(?:search\s+(?:for\s+)?)(.+?)(?:\s+on\s+google|\s+on\s+the\s+web)",
@@ -193,10 +256,18 @@ class ToolRouter:
             )
 
         if launch_match:
-            app_target = launch_match.group(1).strip()
-            # Clean app target and avoid matching web searches, websites, or emails
+            app_target = launch_match.group(1).strip().lower()
+            # Clean app target
             app_target = re.sub(r"\b(?:v\.s\.|v\.\s*s\.|v\s+s)\s*code\b", "vscode", app_target)
-            if not app_target.startswith(("website", "url", "file", "folder", "directory", "youtube", "google", "mail", "email", "channel")):
+
+            # Strict guard against non-applications: videos, channels, whatsapp, websites, screens
+            DISALLOWED_KEYWORDS = [
+                "video", "videos", "channel", "first", "second", "third", "fourth", "1st", "2nd", "3rd",
+                "most watched", "most popular", "whatsapp", "what-up", "chat", "message", "group",
+                "website", "url", "file", "folder", "directory", "youtube", "google", "mail", "email",
+                "screen", "screenshot", "mcp", "mcb", "stitch"
+            ]
+            if not any(dk in app_target for dk in DISALLOWED_KEYWORDS):
                 res = await registry.execute("launch_application", app_name=app_target)
                 return res.get("result", f"Opening {app_target}, Sir.")
 

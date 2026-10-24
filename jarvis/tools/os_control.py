@@ -150,20 +150,22 @@ def get_current_active_window() -> str:
     return "You are currently in your active desktop workspace."
 
 
-@register_tool(name="compose_email", description="Open email client or webmail to compose a mail / email.", category="system")
+@register_tool(name="compose_email", description="Open Gmail in browser to compose a new mail or email without Windows modals.", category="system")
 def compose_email(to: str = "", subject: str = "", body: str = "") -> str:
-    """Open default email client to compose an email."""
+    """Open Gmail composer directly in default browser with zero Windows modals."""
     import urllib.parse
-    params = []
+    params = ["view=cm", "fs=1"]
+    if to:
+        params.append(f"to={urllib.parse.quote(to)}")
     if subject:
-        params.append(f"subject={urllib.parse.quote(subject)}")
+        params.append(f"su={urllib.parse.quote(subject)}")
     if body:
         params.append(f"body={urllib.parse.quote(body)}")
-    query = f"?{'&'.join(params)}" if params else ""
-    target = f"mailto:{to}{query}"
+    target = f"https://mail.google.com/mail/?{'&'.join(params)}"
     try:
         subprocess.Popen(f'start "" "{target}"', shell=True)
-        return "Opening your email composer, Sir."
+        return "Opening Gmail composer in your browser, Sir."
     except Exception as e:
         return f"Failed to open email composer: {e}"
+
 

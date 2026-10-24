@@ -195,9 +195,9 @@ class JarvisPipeline:
         self._listening_timestamp = time.time()
 
     async def _handle_screen_request(self) -> str:
-        """Capture desktop screen and extract real active window and process context."""
+        """Capture desktop screen and extract real active window, process, and OCR content."""
         try:
-            img_path = await asyncio.to_thread(self.screen_tool.capture_screen)
+            img_path = await asyncio.to_thread(self.screen_tool.capture_screen, False)
             active_title = "Desktop"
             try:
                 import win32gui
@@ -208,29 +208,16 @@ class JarvisPipeline:
             except Exception:
                 pass
 
-            running_apps = []
-            try:
-                import psutil
-                for p in psutil.process_iter(['name']):
-                    try:
-                        n = p.info['name']
-                        if n and n.lower().endswith('.exe'):
-                            base = n[:-4].lower()
-                            if base in ['code', 'brave', 'chrome', 'discord', 'blender', 'spotify', 'notepad', 'windowsterminal', 'powershell', 'cmd']:
-                                if base not in running_apps:
-                                    running_apps.append(base)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+            # Extract actual on-screen text with native Windows Media OCR (<30ms)
+            ocr_lines = await self.screen_tool.extract_screen_text(img_path)
+            ocr_summary = " | ".join(ocr_lines[:30]) if ocr_lines else "Active desktop view"
 
-            apps_str = ", ".join(running_apps) if running_apps else "Active desktop session"
             return (
                 f"[LIVE DESKTOP SCREEN CONTEXT]:\n"
                 f"- Screenshot captured and saved to: {img_path.name}\n"
                 f"- Active foreground window in focus: '{active_title}'\n"
-                f"- Open applications on desktop: {apps_str}\n"
-                f"Instruction: Confirm you captured the screen, and concisely tell the user what they have open based on the above."
+                f"- On-screen text and elements: {ocr_summary}\n"
+                f"Instruction: Confirm you captured the screen, and concisely tell {self._user_name} what they currently have open and visible on screen in 1 or 2 natural spoken sentences."
             )
         except Exception as e:
             logger.warning(f"Screen capture notice: {e}")
