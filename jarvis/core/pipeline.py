@@ -31,6 +31,7 @@ from jarvis.audio.mood    import MoodEngine
 from jarvis.brain.ollama_client import OllamaClient
 from jarvis.core.arbiter  import SteerArbiter
 from jarvis.core.config   import load_config
+from jarvis.tools.screen_tool import ScreenTool
 
 
 class JarvisPipeline:
@@ -44,12 +45,13 @@ class JarvisPipeline:
         self._running     = False
 
         # ── Component instances ──────────────────────────────────────────
-        self.stt     = STTEngine()
-        self.tts     = TTSEngine()
-        self.mood    = MoodEngine()
-        self.llm     = OllamaClient()
-        self.arbiter = SteerArbiter(self.tts, self.llm)
-        self.vad     = VADListener(
+        self.stt         = STTEngine()
+        self.tts         = TTSEngine()
+        self.mood        = MoodEngine()
+        self.llm         = OllamaClient()
+        self.arbiter     = SteerArbiter(self.tts, self.llm)
+        self.screen_tool = ScreenTool()
+        self.vad         = VADListener(
             on_speech_segment=self._on_speech_segment,
             is_speaking_fn=lambda: self.tts.is_speaking,
         )
@@ -108,9 +110,10 @@ class JarvisPipeline:
         logger.info("Loading TTS model...")
         await asyncio.to_thread(self.tts.load)
 
-        # 4. Start VAD listener
+        # 4. Start VAD listener and arm real-time voice barge-in
         logger.info("Starting VAD listener...")
         self.vad.start()
+        self.vad.enable_barge_in(self._on_barge_in)
 
         # 5. Start trigger system (wake word + hotkey)
         logger.info("Starting trigger system...")
@@ -181,6 +184,48 @@ class JarvisPipeline:
         self._listening = True
         self._listening_timestamp = time.time()
 
+    async def _handle_screen_request(self) -> str:
+        """Capture desktop screen and extract real active window and process context."""
+        try:
+            img_path = await asyncio.to_thread(self.screen_tool.capture_screen)
+            active_title = "Desktop"
+            try:
+                import win32gui
+                hwnd = win32gui.GetForegroundWindow()
+                title = win32gui.GetWindowText(hwnd)
+                if title and title.strip():
+                    active_title = title.strip()
+            except Exception:
+                pass
+
+            running_apps = []
+            try:
+                import psutil
+                for p in psutil.process_iter(['name']):
+                    try:
+                        n = p.info['name']
+                        if n and n.lower().endswith('.exe'):
+                            base = n[:-4].lower()
+                            if base in ['code', 'brave', 'chrome', 'discord', 'blender', 'spotify', 'notepad', 'windowsterminal', 'powershell', 'cmd']:
+                                if base not in running_apps:
+                                    running_apps.append(base)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            apps_str = ", ".join(running_apps) if running_apps else "Active desktop session"
+            return (
+                f"[LIVE DESKTOP SCREEN CONTEXT]:\n"
+                f"- Screenshot captured and saved to: {img_path.name}\n"
+                f"- Active foreground window in focus: '{active_title}'\n"
+                f"- Open applications on desktop: {apps_str}\n"
+                f"Instruction: Confirm you captured the screen, and concisely tell the user what they have open based on the above."
+            )
+        except Exception as e:
+            logger.warning(f"Screen capture notice: {e}")
+            return "[LIVE DESKTOP SCREEN CONTEXT]: Screenshot captured."
+
     # ──────────────────────────────────────────────────────────────────
     # Core processing pipeline
     # ──────────────────────────────────────────────────────────────────
@@ -221,12 +266,26 @@ class JarvisPipeline:
                     logger.debug(f"Ambient speech ignored (standby mode): '{text}'")
                     return
 
-            if not text.strip():
+            # Ignore brief hesitations ("um", "uh", "ah") without destroying the listening window
+            clean_cmd = text.strip().lower().rstrip(".,!?")
+            if is_armed and (clean_cmd in {"um", "uh", "ah", "hmm", "er", "oh", "like"} or len(clean_cmd) < 2):
+                logger.debug(f"Hesitation '{text}' ignored; keeping 15s follow-up window open.")
+                return
+
+            if len(text.strip()) < 2:
                 return
 
             # Consume the active armed token for this command
             self._listening = False
             logger.info(f"👤 User: {text}")
+
+            # Check for screen / vision command
+            lower_query = text.lower()
+            screen_keywords = ["screenshot", "screen", "what do you see", "look at my screen", "what's on my screen", "what is on my screen", "see my screen", "read my screen"]
+            if any(k in lower_query for k in screen_keywords):
+                logger.info("📸 Screen inspection requested. Capturing desktop context...")
+                screen_ctx = await self._handle_screen_request()
+                text = f"{text}\n\n{screen_ctx}"
 
             # ── 2. Mood analysis (zero-latency background update) ─────────
             mood_state = self.mood.current_mood
@@ -277,10 +336,10 @@ class JarvisPipeline:
 
             await stream_to_tts()
 
-            # Keep listening open for 10 seconds for seamless conversational follow-ups
+            # Keep listening open for 15 seconds for seamless conversational follow-ups
             self._listening = True
             self._listening_timestamp = time.time()
-            logger.debug("🎙️ Conversation window open (10s follow-up)...")
+            logger.info("🎙️ Jarvis is standing by for follow-up questions (15s)...")
 
             # ── 5. Update conversation history ───────────────────────────
             if response_buffer:

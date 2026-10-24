@@ -34,14 +34,14 @@ model           = "Systran/faster-distil-whisper-medium.en"
 model_path      = "models/whisper"
 device          = "cuda"       # cuda | cpu
 compute_type    = "float16"    # float16 on CUDA, int8 on CPU
-beam_size       = 3
+beam_size       = 1            # beam_size 1 = instant greedy decoding (< 150ms)
 language        = "en"
 
 [tts]
 engine          = "kokoro"     # kokoro | piper
 model_path      = "models/kokoro"
 voice           = "bm_george"  # Kokoro British male voice — iconic Jarvis persona
-speed           = 1.15         # 1.15 = snappy, articulate, natural British delivery
+speed           = 1.25         # 1.25 = brisk, fluent, natural British delivery
 device          = "cpu"        # kokoro runs well on CPU; frees GPU for LLM
 
 [llm]

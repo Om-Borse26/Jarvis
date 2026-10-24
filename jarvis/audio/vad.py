@@ -36,9 +36,9 @@ class VADListener:
     CHUNK_SAMPLES   = int(SAMPLE_RATE * CHUNK_MS / 1000)  # 512 samples
 
     # Timing parameters
-    SPEECH_PAD_MS       = 300   # Pad before/after speech for natural capture
-    MIN_SPEECH_MS       = 250   # Ignore very short bursts (<250ms) — noise
-    MAX_SILENCE_MS      = 800   # Stop collecting after 800ms silence
+    SPEECH_PAD_MS       = 250   # Pad before/after speech for natural capture
+    MIN_SPEECH_MS       = 200   # Ignore very short bursts (<200ms) — noise
+    MAX_SILENCE_MS      = 380   # Stop collecting after 380ms silence for snappy response
     PRE_SPEECH_BUFFER_MS= 200   # Rolling buffer before speech onset
 
     def __init__(
@@ -152,18 +152,28 @@ class VADListener:
                 chunk, _ = stream.read(self.CHUNK_SAMPLES)
                 audio    = chunk.flatten()
 
-                # ── Echo Suppression: Never listen to Jarvis's own voice ──
+                # ── Echo Suppression & Voice Barge-in ──
                 now = time.time()
-                if self._is_speaking_fn and self._is_speaking_fn():
+                is_speaking = bool(self._is_speaking_fn and self._is_speaking_fn())
+                if is_speaking:
                     self._last_speaker_active_time = now
+                    # Check for voice barge-in if enabled
+                    if self._barge_in_enabled and self._on_barge_in:
+                        tensor = torch.from_numpy(audio)
+                        prob = self._model(tensor, self.SAMPLE_RATE).item()
+                        rms = float(np.sqrt(np.mean(audio ** 2)))
+                        # Voice barge-in: intentional user speech near mic over speaker sound
+                        if prob >= 0.85 and rms >= 0.045:
+                            logger.info(f"🛑 Voice barge-in detected (prob={prob:.2f}, rms={rms:.3f})! Halting speech...")
+                            self._on_barge_in()
                     in_speech = False
                     speech_chunks = []
                     silence_chunks = 0
                     pre_buf.clear()
                     continue
 
-                if (now - self._last_speaker_active_time) < 0.5:
-                    # Dissipate room acoustic echo
+                if (now - self._last_speaker_active_time) < 0.15:
+                    # Dissipate room acoustic echo (150ms)
                     in_speech = False
                     speech_chunks = []
                     silence_chunks = 0
