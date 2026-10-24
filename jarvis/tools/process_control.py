@@ -9,135 +9,211 @@ Enables Jarvis to:
 from __future__ import annotations
 
 import os
+import difflib
+import json
 import shutil
 import subprocess
+import winreg
 from pathlib import Path
+from typing import Optional, Tuple, List, Dict
 import psutil
 from loguru import logger
 from jarvis.tools.registry import register_tool
 
-# Common executable aliases for rapid launching
-APP_ALIASES = {
-    "vscode": [
-        r"C:\Users\ombor\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Visual Studio Code.lnk",
-        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe"),
-        r"C:\Program Files\Microsoft VS Code\Code.exe",
-    ],
-    "vs code": [
-        r"C:\Users\ombor\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Visual Studio Code.lnk",
-        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe"),
-    ],
-    "visual studio code": [
-        r"C:\Users\ombor\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Visual Studio Code.lnk",
-        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe"),
-    ],
-    "code": [
-        r"C:\Users\ombor\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Visual Studio Code.lnk",
-        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe"),
-    ],
-    "brave": [
-        r"C:\Users\ombor\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Brave.lnk",
-        r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
-        r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
-        os.path.expandvars(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\Application\brave.exe"),
-    ],
-    "brave browser": [
-        r"C:\Users\ombor\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Brave.lnk",
-        r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
-    ],
-    "chrome": [
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
-    ],
-    "blender": [
-        r"C:\Program Files\Blender Foundation\Blender\blender.exe",
-        r"C:\Program Files\Blender Foundation\Blender 4.2\blender.exe",
-        r"C:\Program Files\Blender Foundation\Blender 4.1\blender.exe",
-    ],
-    "discord": [
-        os.path.expandvars(r"%LOCALAPPDATA%\Discord\Update.exe --processStart Discord.exe"),
-    ],
-    "whatsapp": ["cmd /c start whatsapp:"],
-    "whats app": ["cmd /c start whatsapp:"],
-    "notepad": ["notepad.exe"],
-    "calc": ["calc.exe"],
-    "calculator": ["calc.exe"],
-    "explorer": ["explorer.exe"],
-    "terminal": ["wt.exe", "powershell.exe"],
-    "cmd": ["cmd.exe"],
-    "powershell": ["powershell.exe"],
-    "spotify": [
-        os.path.expandvars(r"%APPDATA%\Spotify\Spotify.exe"),
-    ],
-}
 
+class DynamicAppResolver:
+    """
+    Intelligent dynamic Windows application discovery and ranking engine.
+    Eliminates hardcoded paths by scanning:
+      1. User and System Start Menu shortcuts (.lnk)
+      2. Windows Desktop shortcuts
+      3. Windows Registry App Paths (HKLM & HKCU)
+      4. Windows UWP / URI protocol handlers
+      5. System PATH binaries
+    """
 
-def _find_start_menu_shortcut(app_name: str) -> Optional[Path]:
-    """Scan Windows Start Menu and Desktop for installed .lnk shortcuts."""
-    clean = app_name.lower().replace(" ", "").replace("-", "").replace("_", "")
-    alias_map = {
-        "vscode": "visualstudiocode",
-        "vs": "visualstudiocode",
-        "code": "visualstudiocode",
-        "chrome": "googlechrome",
-        "edge": "microsoftedge",
+    IGNORE_TERMS = {
+        "uninstall", "remove", "setup", "install", "readme", "help",
+        "documentation", "license", "website", "url", "updater",
+        "troubleshooter", "release notes", "service", "crash", "handler"
     }
-    target = alias_map.get(clean, clean)
 
-    search_dirs = [
-        Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs",
-        Path("C:/ProgramData/Microsoft/Windows/Start Menu/Programs"),
-        Path.home() / "Desktop",
-    ]
-    for d in search_dirs:
-        if not d.exists():
-            continue
+    UWP_PROTOCOLS: Dict[str, str] = {
+        "whatsapp": "cmd /c start whatsapp:",
+        "whats app": "cmd /c start whatsapp:",
+        "spotify": "cmd /c start spotify:",
+        "calculator": "calc.exe",
+        "calc": "calc.exe",
+        "terminal": "wt.exe",
+        "cmd": "cmd.exe",
+        "command prompt": "cmd.exe",
+        "powershell": "powershell.exe",
+        "notepad": "notepad.exe",
+        "explorer": "explorer.exe",
+        "file explorer": "explorer.exe",
+        "settings": "cmd /c start ms-settings:",
+        "camera": "cmd /c start microsoft.windows.camera:",
+        "store": "cmd /c start ms-windows-store:",
+    }
+
+    def __init__(self, cache_file: str = "data/app_index.json") -> None:
+        self.cache_file = Path(cache_file)
+        self.cache_file.parent.mkdir(parents=True, exist_ok=True)
+        self._apps: List[Tuple[str, str, str]] = []  # (name, path_or_target, source)
+        self.refresh()
+
+    def refresh(self) -> int:
+        """Scan Windows filesystem and registry for all installed applications."""
+        discovered: List[Tuple[str, str, str]] = []
+
+        # 1. Start Menu & Desktops
+        search_dirs = [
+            Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs",
+            Path("C:/ProgramData/Microsoft/Windows/Start Menu/Programs"),
+            Path(os.environ.get("USERPROFILE", "")) / "Desktop",
+            Path("C:/Users/Public/Desktop"),
+        ]
+        for d in search_dirs:
+            if d.exists():
+                try:
+                    for f in d.rglob("*.lnk"):
+                        discovered.append((f.stem, str(f), "shortcut"))
+                except Exception:
+                    pass
+
+        # 2. Windows Registry App Paths (HKLM & HKCU)
+        for root in [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]:
+            try:
+                key = winreg.OpenKey(root, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths")
+                count = winreg.QueryInfoKey(key)[0]
+                for i in range(count):
+                    try:
+                        sub = winreg.EnumKey(key, i)
+                        sub_key = winreg.OpenKey(key, sub)
+                        val, _ = winreg.QueryValueEx(sub_key, "")
+                        winreg.CloseKey(sub_key)
+                        if val and os.path.exists(val):
+                            stem = Path(sub).stem
+                            discovered.append((stem, val, "registry"))
+                    except Exception:
+                        pass
+                winreg.CloseKey(key)
+            except Exception:
+                pass
+
+        self._apps = discovered
+        logger.debug(f"[APP_RESOLVER] Indexed {len(self._apps)} installed applications.")
+        return len(self._apps)
+
+    def resolve(self, query: str) -> Optional[Tuple[float, str, str, str]]:
+        """
+        Score and rank installed applications against the query.
+        Returns (score, matched_name, target_path, source_type) or None.
+        """
+        q = query.lower().strip()
+        if not q:
+            return None
+
+        # Check UWP / direct protocols first
+        if q in self.UWP_PROTOCOLS:
+            return (1.0, q, self.UWP_PROTOCOLS[q], "protocol")
+
+        q_clean = q.replace("-", " ").replace("_", " ")
+        q_tokens = set(q_clean.split())
+        q_compact = q.replace(" ", "").replace("-", "").replace("_", "")
+
+        scored: List[Tuple[float, str, str, str]] = []
+
+        for stem, path, ctype in self._apps:
+            stem_lower = stem.lower()
+            if any(ign in stem_lower for ign in self.IGNORE_TERMS):
+                continue
+
+            stem_clean = stem_lower.replace("-", " ").replace("_", " ")
+            stem_tokens = set(stem_clean.split())
+            stem_compact = stem_lower.replace(" ", "").replace("-", "").replace("_", "")
+
+            # Rule 1: Exact match
+            if q == stem_lower or q_compact == stem_compact:
+                score = 1.0
+            # Rule 2: Token subset (e.g. 'code' in 'Visual Studio Code', or 'vs code')
+            elif q_tokens.issubset(stem_tokens):
+                score = 0.95
+            # Rule 3: Acronym match (e.g. 'vscode' -> 'Visual Studio Code')
+            elif "".join(w[0] for w in stem_clean.split() if w) == q_compact:
+                score = 0.93
+            # Rule 4: All query tokens appear as substrings of stem tokens
+            elif all(any(qt in st for st in stem_tokens) for qt in q_tokens):
+                score = 0.90
+            # Rule 5: Substring containment
+            elif q_compact in stem_compact:
+                score = 0.85
+            elif stem_compact in q_compact:
+                score = 0.80
+            # Rule 6: Fuzzy SequenceMatcher
+            else:
+                ratio = difflib.SequenceMatcher(None, q, stem_lower).ratio()
+                score = ratio if ratio >= 0.55 else 0.0
+
+            if score >= 0.50:
+                # Slight preference for Start Menu shortcuts over raw registry paths
+                adj_score = score + (0.02 if ctype == "shortcut" else 0.0)
+                scored.append((adj_score, stem, path, ctype))
+
+        if scored:
+            scored.sort(key=lambda x: x[0], reverse=True)
+            return scored[0]
+
+        # Fallback: check PATH
+        which_path = shutil.which(query) or shutil.which(f"{query}.exe")
+        if which_path:
+            return (0.75, query, which_path, "path")
+
+        return None
+
+    def launch(self, query: str) -> str:
+        """Find best application match and launch it."""
+        match = self.resolve(query)
+        if not match:
+            # Last-ditch shell start
+            try:
+                subprocess.Popen(f'start "" "{query}"', shell=True)
+                return f"Attempting to launch {query}, Sir."
+            except Exception as e:
+                return f"Could not find or launch application '{query}': {e}"
+
+        score, name, target, source = match
         try:
-            for lnk in d.rglob("*.lnk"):
-                stem = lnk.stem.lower().replace(" ", "").replace("-", "").replace("_", "")
-                if target in stem or stem in target:
-                    return lnk
-        except Exception:
-            continue
-    return None
-
-
-@register_tool(name="launch_application", description="Launch an application by name (e.g. vs code, brave, blender, discord, notepad, whatsapp).", category="process")
-def launch_application(app_name: str) -> str:
-    """Launch an application by name using exact paths, shortcuts, or system shell."""
-    clean = app_name.lower().strip()
-
-    # 1. Check known aliases
-    if clean in APP_ALIASES:
-        for candidate in APP_ALIASES[clean]:
-            if candidate.startswith("cmd /c"):
-                subprocess.Popen(candidate, shell=True)
-                return f"Opening {app_name}, Sir."
-            parts = candidate.split(" ")
-            exe = parts[0]
-            if Path(exe).exists() or shutil.which(exe):
-                if exe.endswith(".lnk"):
-                    os.startfile(exe)
+            if source == "protocol":
+                if target.startswith("cmd /c"):
+                    subprocess.Popen(target, shell=True)
                 else:
-                    subprocess.Popen(candidate, shell=True)
-                return f"Opening {app_name}, Sir."
-
-    # 2. Check dynamic Start Menu and Desktop shortcuts
-    shortcut = _find_start_menu_shortcut(clean)
-    if shortcut and shortcut.exists():
-        try:
-            os.startfile(str(shortcut))
-            return f"Opening {shortcut.stem}, Sir."
+                    subprocess.Popen(target)
+                return f"Opening {name.title()}, Sir."
+            elif source == "shortcut" and target.endswith(".lnk"):
+                os.startfile(target)
+                return f"Opening {name}, Sir."
+            else:
+                # Executable path
+                if Path(target).exists():
+                    os.startfile(target)
+                else:
+                    subprocess.Popen(f'"{target}"', shell=True)
+                return f"Opening {name}, Sir."
         except Exception as e:
-            logger.warning(f"Could not start shortcut {shortcut}: {e}")
+            logger.error(f"Error launching {name} ({target}): {e}")
+            return f"Failed to open {name}: {e}"
 
-    # 3. Fallback to Windows shell start
-    try:
-        subprocess.Popen(f'start "" "{clean}"', shell=True)
-        return f"Opening {app_name}, Sir."
-    except Exception as e:
-        return f"Failed to launch {app_name}: {e}"
+
+# Global application resolver instance
+app_resolver = DynamicAppResolver()
+
+
+@register_tool(name="launch_application", description="Launch an application dynamically by name (e.g. vs code, brave, blender, excel, docker, whatsapp, notepad).", category="process")
+def launch_application(app_name: str) -> str:
+    """Dynamically discover, rank, and launch any installed application without hardcoded paths."""
+    clean = app_name.lower().strip()
+    return app_resolver.launch(clean)
 
 
 @register_tool(name="kill_process", description="Terminate a running application or process by name (e.g. chrome, brave, blender).", category="process")

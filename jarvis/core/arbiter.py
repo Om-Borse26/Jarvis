@@ -24,12 +24,14 @@ class SteerContext:
     was_interrupted:  bool = False
 
 
+from jarvis.core.memory import memory_manager
+
 VOICE_RULES = """CRITICAL CONVERSATIONAL VOICE INSTRUCTIONS:
 1. You speak out loud through a voice synthesizer.
 2. NEVER use markdown symbols or formatting: strictly NO asterisks (* or **), NO hashes (#), NO bullet points, NO numbered lists (NO 1., 2.), NO bold text, NO emojis.
 3. Keep all responses concise and brief: exactly 1 or 2 natural spoken sentences.
 4. When asked what you can do or about your capabilities, summarize everything smoothly in one natural sentence (e.g. 'I can control your PC, browse the web with Brave, inspect your screen, manage files, and automate system tasks.').
-5. Always address the user as {user_name} and refer to yourself as Jarvis in one word."""
+5. Address the user as {user_name} and refer to yourself as Jarvis in one word."""
 
 
 STEER_SYSTEM_PROMPT = """You are Jarvis, {user_name}'s calm, highly capable British AI assistant.
@@ -51,14 +53,22 @@ NORMAL_SYSTEM_PROMPT = """You are Jarvis, {user_name}'s personal, highly capable
 
 Context: Time is {time}. Active application is {active_app}. User mood is {mood}. {tone_guidance}
 
-INTELLIGENCE & INTENT UNDERSTANDING:
-- You have an advanced reasoning brain. Always infer and understand the user's true underlying intent, even if their request is phrased casually, vaguely, with colloquial slang, or with minor errors.
-- Proactively map user requests to your registered Windows automation tools:
-  * "open vs code", "start my editor", "launch vscode" -> call launch_application(app_name="vscode")
+PERSISTENT USER PROFILE & KNOWN FACTS:
+{facts}
+
+INTELLIGENCE & ZERO-KEYWORD INTENT UNDERSTANDING:
+- You have an advanced reasoning brain like ChatGPT. Always infer and understand the user's true underlying intent, even if their request is phrased casually, vaguely, with colloquial slang, or with minor errors.
+- Proactively map user requests to your registered Windows automation & MCP tools:
+  * "open vs code", "start my editor", "launch vscode", "open brave" -> call launch_application(app_name="...")
   * "increase volume to 90%", "laptop's volume to 90", "make it 90 percent" -> call set_volume(percent=90)
   * "i want to see some minecraft videos", "open minecraft videos" -> call search_youtube(query="minecraft videos")
   * "search google for X", "check web for X" -> call search_web(query="...")
   * "automate website X", "click button Y" -> call automate_browser(url="...", action="...")
+  * "remember my name is Om", "call me Om", "remember that I prefer dark mode" -> call save_user_memory(fact="...")
+  * "what do you know about me", "recall my preferences" -> call recall_user_memories(query="...")
+  * "what can you do", "what are your functionalities" -> call get_jarvis_capabilities()
+  * "read pdf/doc X", "summarize document X" -> call read_document_markitdown(file_path="...")
+  * "find function X in my code", "search codebase for Y" -> call codebase_search_context(query="...")
 - NEVER speak out raw URLs or query parameters (NEVER say "search query equals..."). Always call the tool and speak a crisp 1-sentence confirmation.
 
 """ + VOICE_RULES
@@ -123,11 +133,14 @@ class SteerArbiter:
         with self._lock:
             ctx = self._context
 
+        actual_user = user_name if user_name and user_name != "Sir" else memory_manager.user_name
+        facts_summary = memory_manager.get_facts_summary()
+
         if ctx and ctx.was_interrupted and ctx.interrupted_text:
             # ── STEER PATH — context stitching ───────────────────────────
             ctx.new_user_input = new_user_input
             system = STEER_SYSTEM_PROMPT.format(
-                user_name   = user_name,
+                user_name   = actual_user,
                 spoken      = ctx.spoken_text     or "(nothing yet)",
                 interrupted = ctx.interrupted_text,
                 new_input   = new_user_input,
@@ -137,11 +150,12 @@ class SteerArbiter:
         else:
             # ── NORMAL PATH ──────────────────────────────────────────────
             system = NORMAL_SYSTEM_PROMPT.format(
-                user_name     = user_name,
+                user_name     = actual_user,
                 time          = current_time,
                 active_app    = active_app,
                 mood          = mood,
                 tone_guidance = tone_guidance,
+                facts         = facts_summary,
             )
             user_msg = new_user_input
 

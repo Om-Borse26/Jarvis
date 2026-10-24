@@ -142,7 +142,7 @@ async def run_diagnostics():
         results["Media & Window Control"] = f"FAILED: {e}"
 
     # ── 8. FAST-PATH ROUTER LATENCY & MATCHING ────
-    print("\n[8/8] Testing Fast-Path Intent Router...")
+    print("\n[8/10] Testing Fast-Path Intent Router...")
     try:
         router = ToolRouter()
         queries = [
@@ -152,6 +152,7 @@ async def run_diagnostics():
             "what is my ip",
             "pause music",
             "read clipboard",
+            "what are your functionalities",
         ]
         latencies = []
         for q in queries:
@@ -162,9 +163,44 @@ async def run_diagnostics():
             print(f"  - Fast-path '{q}': {dt:.2f}ms -> {resp[:65]}...")
             assert resp is not None
         avg_lat = sum(latencies) / len(latencies)
-        results["Fast-Path Router"] = f"PASSED (avg latency: {avg_lat:.2f}ms across 6 commands)"
+        results["Fast-Path Router"] = f"PASSED (avg latency: {avg_lat:.2f}ms across {len(queries)} commands)"
     except Exception as e:
         results["Fast-Path Router"] = f"FAILED: {e}"
+
+    # ── 9. DYNAMIC APP DISCOVERY (NO HARDCODING) ──
+    print("\n[9/10] Testing Dynamic App Discovery & Ranking...")
+    try:
+        from jarvis.tools.process_control import app_resolver
+        test_apps = ["vscode", "vs code", "brave", "blender", "chrome", "notepad"]
+        for ta in test_apps:
+            res = app_resolver.resolve(ta)
+            print(f"  - resolve('{ta}'): {res[1] if res else 'None'} ({res[3] if res else '-'}) score={res[0]:.2f}")
+            assert res is not None and res[0] >= 0.70
+        results["Dynamic App Resolver"] = f"PASSED (Indexed {len(app_resolver._apps)} apps, zero hardcoding)"
+    except Exception as e:
+        results["Dynamic App Resolver"] = f"FAILED: {e}"
+
+    # ── 10. MEMORY & MCP INTEGRATIONS ──────────────
+    print("\n[10/10] Testing Memory & MCP Tools...")
+    try:
+        save_res = registry.get_tool("save_user_memory").func(fact="Diagnostic run completed at 2026-10-24")
+        print("  - save_user_memory():", save_res)
+        
+        recall_res = registry.get_tool("recall_user_memories").func(query="Diagnostic")
+        print("  - recall_user_memories():", recall_res)
+        assert "Diagnostic" in recall_res
+        
+        mcp_res = registry.get_tool("list_mcp_servers").func()
+        print("  - list_mcp_servers():", mcp_res)
+        assert "playwright" in mcp_res.lower()
+        
+        code_res = registry.get_tool("codebase_search_context").func(query="VADListener")
+        print("  - codebase_search_context('VADListener'):", code_res.splitlines()[1] if len(code_res.splitlines()) > 1 else code_res)
+        assert "vad.py" in code_res or "pipeline.py" in code_res
+        
+        results["Memory & MCP Tools"] = "PASSED (fact storage, recall, MCP servers, and codebase search working)"
+    except Exception as e:
+        results["Memory & MCP Tools"] = f"FAILED: {e}"
 
     print("\n" + "=" * 65)
     print("                 LIVE DIAGNOSTICS RESULT SUMMARY")

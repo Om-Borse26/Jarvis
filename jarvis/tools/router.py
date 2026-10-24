@@ -158,6 +158,41 @@ class ToolRouter:
             res = await registry.execute("get_network_info")
             return res.get("result")
 
+        # ── Capabilities & Memory Fast-Paths ─────────────────────────────
+        capability_triggers = [
+            "what can you do", "what are your capabilities", "what are your functionalities",
+            "what functionalities do you have", "tell me what you can do", "what are your features",
+            "what do you do", "how can you help me"
+        ]
+        if any(ct in text for ct in capability_triggers):
+            res = await registry.execute("get_jarvis_capabilities")
+            return res.get("result")
+
+        memory_queries = [
+            "what do you remember about me", "what do you know about me", "recall my preferences",
+            "what is my name", "what's my name", "who am i", "tell me what you remember"
+        ]
+        if any(mq in text for mq in memory_queries):
+            res = await registry.execute("recall_user_memories")
+            return res.get("result")
+
+        # "remember my name is Om", "call me Om", "remember that I prefer dark mode"
+        remember_match = re.search(r"(?:remember\s+(?:that\s+)?)?(?:my\s+name\s+is|call\s+me)\s+([a-zA-Z]+)", text)
+        if remember_match:
+            name_val = remember_match.group(1).title()
+            res = await registry.execute("save_user_memory", fact=f"User's name is {name_val}")
+            return res.get("result")
+
+        if text.startswith("remember that ") or text.startswith("remember "):
+            fact_val = re.sub(r"^remember\s+(?:that\s+)?", "", text).strip()
+            if fact_val:
+                res = await registry.execute("save_user_memory", fact=fact_val)
+                return res.get("result")
+
+        if text in ("list mcp servers", "show mcp servers", "what mcps are installed", "what mcp servers are there"):
+            res = await registry.execute("list_mcp_servers")
+            return res.get("result")
+
         return None
 
     def get_tool_prompt_section(self) -> str:

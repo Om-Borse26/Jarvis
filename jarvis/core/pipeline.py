@@ -18,6 +18,7 @@ import asyncio
 import datetime
 import threading
 import time
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -31,6 +32,7 @@ from jarvis.audio.mood    import MoodEngine
 from jarvis.brain.ollama_client import OllamaClient
 from jarvis.core.arbiter  import SteerArbiter
 from jarvis.core.config   import load_config
+from jarvis.core.memory   import memory_manager
 from jarvis.tools.screen_tool import ScreenTool
 from jarvis.audio.speaker_id import speaker_id
 import jarvis.tools  # Automatically registers all tools & plugins
@@ -74,7 +76,7 @@ class JarvisPipeline:
         self._cancel_llm           = asyncio.Event()
         self._conversation_history: list  = []
         self._max_history          = self._cfg["memory"]["max_l1_turns"] * 2  # user+assistant turns
-        self._user_name            = self._cfg["jarvis"]["user_name"]
+        self._user_name            = memory_manager.user_name or self._cfg["jarvis"]["user_name"]
 
         # Active application context (updated by system monitor)
         self._active_app = "Desktop"
@@ -288,13 +290,40 @@ class JarvisPipeline:
 
             # ── Speaker Verification & Voice Enrollment ───────────────────
             clean_lower = text.lower().strip().rstrip(".!?")
-            if any(k in clean_lower for k in ["enroll my voice", "register my voice", "remember my voice", "save my voice"]):
-                logger.info("🎙️ Enrolling user voiceprint...")
+
+            # Check for zero-keyword natural voice enrollment intent:
+            # Matches "I want to register my voice and you will follow commands from only that voice",
+            # "learn my voice", "register my voice", "listen only to my voice", "save my voice profile", etc.
+            VOICE_ENROLLMENT_PATTERNS = [
+                r"(?:register|enroll|learn|save|remember|record|train|set\s*up)\s+(?:my|the)\s+voice",
+                r"(?:follow|listen\s+to|respond\s+to|take\s+commands\s+from)\s+(?:only|just)\s+(?:from\s+)?my\s+voice",
+                r"voice\s+(?:profile|biometrics|recognition|identification)",
+                r"(?:recognize|identify)\s+my\s+voice",
+                r"(?:only\s+)?(?:follow|obey|respond\s+to)\s+(?:commands\s+from\s+)?(?:only\s+)?me",
+                r"want\s+(?:you\s+to\s+)?(?:register|learn|recognize|save)\s+my\s+voice",
+            ]
+            if any(re.search(pat, clean_lower) for pat in VOICE_ENROLLMENT_PATTERNS):
+                logger.info("🎙️ Enrolling user voiceprint from spoken speech...")
                 enrolled = self.speaker_id.enroll(self._user_name, audio)
                 if enrolled:
-                    resp = f"Voiceprint recorded successfully, {self._user_name}. I will now only follow and respond to your voice."
+                    memory_manager._profile["voice_enrolled"] = True
+                    memory_manager._profile["registered_speaker"] = self._user_name
+                    memory_manager.save_profile()
+                    resp = f"Voiceprint registered successfully, {self._user_name}. I have memorized your acoustic profile and will now only follow and respond to your voice."
                 else:
                     resp = f"I could not capture a clear voice sample, {self._user_name}. Please try speaking a slightly longer sentence."
+                await self._speak_async(resp)
+                self._listening = True
+                self._listening_timestamp = time.time()
+                return
+
+            # Direct name registration ("remember my name is Om", "call me Om", "my name is Om")
+            name_m = re.search(r"(?:remember\s+(?:that\s+)?)?(?:my\s+name\s+is|call\s+me)\s+([a-zA-Z]+)", clean_lower)
+            if name_m:
+                new_name = name_m.group(1).title()
+                self._user_name = new_name
+                memory_manager.set_user_name(new_name)
+                resp = f"It is a pleasure, {new_name}. I have committed your name to memory and will address you accordingly."
                 await self._speak_async(resp)
                 self._listening = True
                 self._listening_timestamp = time.time()
