@@ -78,6 +78,10 @@ vault_path      = "data/vault.db"
 # Leave empty [] to start none at boot and connect on demand via voice
 # ("connect the playwright server"). Others can be marked "disabled": true there.
 autostart_servers = ["playwright"]
+registry_db_path    = "config/tools_registry.json"
+auto_search_online  = true    # Search GitHub/MCP registry for new tools
+auto_generate       = true    # Generate MCPs using qwen2.5-coder if not found
+sandbox_execution   = true    # Run generated MCPs in subprocess sandbox
 
 [ui]
 enabled     = true        # Control server (orb + dashboard)
@@ -89,6 +93,8 @@ launch_hud  = true        # Spawn the HUD overlay (notifications + confirmations
 enabled     = true        # Eve phone companion LAN sync server
 port        = 8765        # Open http://<your-pc-lan-ip>:8765/eve on your phone
 bind        = "0.0.0.0"   # LAN-reachable; pairing token gates all data access
+sync_mode   = "lan"       # lan | tailscale
+proximity_method = "arp"  # arp (LAN MAC detection) | bluetooth
 
 [hud]
 # Window behavior
@@ -131,17 +137,5 @@ critical_keywords = [
     "post", "upload", "submit", "purchase", "pay", "transfer",
     "shutdown", "restart", "registry"
 ]
-
-[mcp]
-registry_db_path    = "config/tools_registry.json"
-auto_search_online  = true    # Search GitHub/MCP registry for new tools
-auto_generate       = true    # Generate MCPs using qwen2.5-coder if not found
-sandbox_execution   = true    # Run generated MCPs in subprocess sandbox
-
-[eve]
-enabled             = false   # Enable when Eve is set up on phone
-sync_port           = 8475
-sync_mode           = "lan"   # lan | tailscale
-proximity_method    = "arp"   # arp (LAN MAC detection) | bluetooth
 nothing_phone_mac   = ""      # Fill in after first pairing: e.g. "AA:BB:CC:DD:EE:FF"
 greeting_on_arrival = true

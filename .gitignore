@@ -26,6 +26,9 @@ data/
 
 # Config with secrets
 config/settings.local.toml
+# Runtime-generated config (user-specific, not source)
+config/permissions.json
+config/tools_registry.json
 
 # Logs
 *.log
