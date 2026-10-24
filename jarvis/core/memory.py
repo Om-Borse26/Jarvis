@@ -101,6 +101,11 @@ class MemoryManager:
         }
         self._facts.append(entry)
         self.save_facts()
+        try:
+            from jarvis.memory.semantic import semantic_memory
+            semantic_memory.add(clean, category)
+        except Exception:
+            pass
         logger.info(f"🧠 [MEMORY] Stored fact: '{clean}' [{category}]")
         return f"Understood, Sir. I will remember that {clean}"
 
@@ -150,6 +155,14 @@ def recall_user_memories(query: str = "") -> str:
         return "I do not have any saved personal memories yet, Sir."
 
     if query.strip():
+        # Prefer meaning-based recall (L4 semantic); fall back to keyword match.
+        try:
+            from jarvis.memory.semantic import semantic_memory
+            hits = semantic_memory.recall(query, k=5)
+        except Exception:
+            hits = []
+        if hits:
+            return "Here is what I remember: " + " ".join(hits)
         q = query.lower()
         matched = [f["fact"] for f in facts if q in f["fact"].lower() or q in f.get("category", "").lower()]
         if matched:

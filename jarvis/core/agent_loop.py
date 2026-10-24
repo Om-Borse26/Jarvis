@@ -28,6 +28,7 @@ from loguru import logger
 from jarvis.tools.registry import registry
 from jarvis.core.rules_engine import rules_engine
 from jarvis.security.consent import consent_manager
+from jarvis.memory.working import working_memory
 
 
 # ─── Data Structures ──────────────────────────────────────────────────────────
@@ -319,6 +320,7 @@ class AgentLoop:
                 result=result_text,
                 entity=tool_args.get("path", tool_args.get("app_name", tool_args.get("file_path", ""))),
             )
+            working_memory.add_observation(tool_name, tool_args, result_text)
 
             messages.append({
                 "role": "assistant",

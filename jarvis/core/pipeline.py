@@ -42,6 +42,8 @@ from jarvis.core.agent_loop import AgentLoop
 from jarvis.audio.accent_normalizer import SpeechNormalizer
 from jarvis.security.consent import consent_manager
 from jarvis.tools.mcp_runtime import mcp_manager
+from jarvis.memory.working import working_memory
+from jarvis.memory.episodic import episodic_memory
 
 
 class JarvisPipeline:
@@ -234,6 +236,7 @@ class JarvisPipeline:
             # Extract actual on-screen text with native Windows Media OCR (<30ms)
             ocr_lines = await self.screen_tool.extract_screen_text(img_path)
             ocr_summary = " | ".join(ocr_lines[:30]) if ocr_lines else "Active desktop view"
+            working_memory.set_screen_text(ocr_summary)
 
             return (
                 f"[LIVE DESKTOP SCREEN CONTEXT]:\n"
@@ -397,6 +400,8 @@ class JarvisPipeline:
                         self._active_app = fg_title.strip()
             except Exception:
                 pass
+            working_memory.set_active_app(self._active_app)
+            working_memory.start_task(text)
 
             system_prompt, user_msg = self.arbiter.build_prompt(
                 new_user_input = text,
@@ -406,6 +411,8 @@ class JarvisPipeline:
                 mood           = mood_state.mood,
                 tone_guidance  = mood_state.tone_guidance,
             )
+            # Inject tiered-memory context: live state (L2) + related past (L3).
+            system_prompt += self._build_memory_context(text)
 
             # ── 4. Single tool-aware decision (native function calling) ──
             # One LLM call decides: speak conversationally OR invoke a tool.
@@ -472,6 +479,15 @@ class JarvisPipeline:
                     self._conversation_history = \
                         self._conversation_history[-self._max_history:]
 
+            # ── 6. Record this interaction in episodic memory (L3) ───────
+            episodic_memory.record(
+                user_input=text,
+                tools_used=working_memory.recent_tools(),
+                outcome=final_response,
+                success=bool(final_response) and not self._cancel_llm.is_set(),
+            )
+            working_memory.clear_task()
+
         except Exception as e:
             logger.exception(f"Pipeline error: {e}")
             await self._speak_async("I encountered an error. Please try again.")
@@ -496,6 +512,24 @@ class JarvisPipeline:
             await mcp_manager.start_all(only=autostart)
         except Exception as e:
             logger.warning(f"[MCP] Startup notice: {e}")
+
+    def _build_memory_context(self, user_text: str) -> str:
+        """Compose the live (L2) + related past (L3) memory block for the prompt."""
+        parts = []
+        live = working_memory.context_snapshot()
+        if live:
+            parts.append(f"\n\nLIVE CONTEXT:\n{live}")
+        try:
+            past = episodic_memory.search(user_text, limit=2)
+        except Exception:
+            past = []
+        if past:
+            lines = [
+                f"- Earlier you asked '{e['user_input']}' and I used {', '.join(e['tools']) or 'no tools'}."
+                for e in past
+            ]
+            parts.append("\n\nRELATED PAST ACTIONS:\n" + "\n".join(lines))
+        return "".join(parts)
 
     def _time_of_day(self) -> str:
         hour = datetime.datetime.now().hour
