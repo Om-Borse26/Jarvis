@@ -115,6 +115,7 @@ class JarvisPipeline:
 
         # ── UI: state bridge + control server (orb + dashboard) ─────────
         self._ui_server: Optional[ControlServer] = None
+        self._eve_server = None
         self.tts.on_speaking_start = lambda: state_bridge.set("speaking")
         self.tts.on_speaking_stop  = lambda: state_bridge.set("idle")
 
@@ -177,6 +178,9 @@ class JarvisPipeline:
         # 9. Start the UI control server + desktop orb (best-effort)
         self._start_ui()
 
+        # 10. Start the Eve phone-companion sync server (best-effort)
+        self._start_eve()
+
         self._running = True
         logger.success("✅ Jarvis is online and listening.")
 
@@ -211,6 +215,8 @@ class JarvisPipeline:
             pass
         if self._ui_server:
             self._ui_server.stop()
+        if self._eve_server:
+            self._eve_server.stop()
         lifecycle.release_single_instance()
         logger.info("Jarvis shut down.")
 
@@ -600,6 +606,21 @@ class JarvisPipeline:
             webbrowser.open(f"http://127.0.0.1:{self._ui_port()}/")
         except Exception as e:
             logger.debug(f"[UI] could not open dashboard: {e}")
+
+    def _start_eve(self):
+        """Start the Eve LAN sync server so the phone companion can connect."""
+        eve_cfg = self._cfg.get("eve", {})
+        if not eve_cfg.get("enabled", True):
+            return
+        try:
+            from jarvis.eve.server import EveSyncServer
+            self._eve_server = EveSyncServer(
+                port=int(eve_cfg.get("port", 8765)),
+                bind=eve_cfg.get("bind", "0.0.0.0"),
+            )
+            self._eve_server.start()
+        except Exception as e:
+            logger.debug(f"[Eve] sync server not started: {e}")
 
     async def _announce_eve_handoffs(self):
         """Speak any tasks/notes Eve queued from the phone, then acknowledge them."""
