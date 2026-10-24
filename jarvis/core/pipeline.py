@@ -49,7 +49,10 @@ class JarvisPipeline:
         self.mood    = MoodEngine()
         self.llm     = OllamaClient()
         self.arbiter = SteerArbiter(self.tts, self.llm)
-        self.vad     = VADListener(on_speech_segment=self._on_speech_segment)
+        self.vad     = VADListener(
+            on_speech_segment=self._on_speech_segment,
+            is_speaking_fn=lambda: self.tts.is_speaking,
+        )
         self.trigger = TriggerSystem(
             on_trigger=self._on_trigger_fired,
             on_mode_change=self._on_wake_mode_changed,
@@ -57,17 +60,15 @@ class JarvisPipeline:
 
         # ── State ────────────────────────────────────────────────────────
         self._loop: Optional[asyncio.AbstractEventLoop] = None
-        self._listening       = False     # True when actively recording user speech
-        self._cancel_llm      = asyncio.Event()
+        self._listening            = False     # True when actively recording user speech
+        self._listening_timestamp  = 0.0
+        self._cancel_llm           = asyncio.Event()
         self._conversation_history: list  = []
-        self._max_history     = self._cfg["memory"]["max_l1_turns"] * 2  # user+assistant turns
-        self._user_name       = self._cfg["jarvis"]["user_name"]
+        self._max_history          = self._cfg["memory"]["max_l1_turns"] * 2  # user+assistant turns
+        self._user_name            = self._cfg["jarvis"]["user_name"]
 
         # Active application context (updated by system monitor)
         self._active_app = "Desktop"
-
-        # ── Wire barge-in ────────────────────────────────────────────────
-        self.vad.enable_barge_in(callback=self._on_barge_in)
 
         # ── Wire HUD callbacks (set externally when HUD is ready) ────────
         self.tts.on_speaking_start = None
@@ -143,10 +144,13 @@ class JarvisPipeline:
 
     def _on_trigger_fired(self):
         """Called from trigger thread when wake word or hotkey fires."""
-        if self._listening:
-            return   # Already listening
+        if self.tts.is_speaking:
+            logger.info("🛑 Hotkey pressed during speech — interrupting playback.")
+            self.tts.interrupt()
+            self._cancel_llm.set()
         logger.info("🎙️ Listening armed (Hotkey Win+J). Speak now...")
         self._listening = True
+        self._listening_timestamp = time.time()
 
     def _on_wake_mode_changed(self, enabled: bool):
         """Spoken notification when wake word is toggled live via Win+Shift+J."""
@@ -156,6 +160,9 @@ class JarvisPipeline:
 
     def _on_speech_segment(self, audio):
         """Called by VAD when a complete speech segment is ready."""
+        # Never process speech if Jarvis is speaking
+        if self.tts.is_speaking:
+            return
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(
                 self._process_speech(audio),
@@ -163,11 +170,11 @@ class JarvisPipeline:
             )
 
     def _on_barge_in(self):
-        """Called by VAD when voice is detected during TTS playback."""
-        logger.debug("Barge-in detected.")
+        """Called when user explicitly interrupts."""
         self.arbiter.on_barge_in()
-        self._cancel_llm.set()    # Cancel any in-progress LLM generation
-        self._listening = True    # Arm for the next speech segment
+        self._cancel_llm.set()
+        self._listening = True
+        self._listening_timestamp = time.time()
 
     # ──────────────────────────────────────────────────────────────────
     # Core processing pipeline
@@ -176,26 +183,36 @@ class JarvisPipeline:
     async def _process_speech(self, audio):
         """Full pipeline: audio → STT → Mood → Arbiter → LLM → TTS."""
         try:
+            if self.tts.is_speaking:
+                return
+
             # ── 1. Transcribe ────────────────────────────────────────────
             text = await asyncio.to_thread(self.stt.transcribe, audio)
             if not text or not text.strip():
                 return
 
-            was_listening = self._listening
+            now = time.time()
+            is_armed = self._listening and (now - self._listening_timestamp < 8.0)
             self._listening = False
 
-            # Check trigger conditions: active session OR wake word recognized
-            if not was_listening:
+            # Check trigger conditions: armed by hotkey OR explicit wake phrase
+            if is_armed:
+                text = self.trigger.strip_wake_word(text)
+            else:
                 if self.trigger.wake_word_enabled and self.trigger.is_wake_word(text):
                     logger.success(f"🎙️  Wake word recognized in: '{text}'")
                     text = self.trigger.strip_wake_word(text)
-                    if not text:
+                    if not text or len(text.strip()) < 2:
                         await self._speak_async(f"At your service, {self._user_name}.")
                         self._listening = True
+                        self._listening_timestamp = time.time()
                         return
                 else:
                     logger.debug(f"Ambient speech ignored: '{text}'")
                     return
+
+            if not text.strip():
+                return
 
             logger.info(f"👤 User: {text}")
 

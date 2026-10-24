@@ -41,24 +41,32 @@ class VADListener:
     MAX_SILENCE_MS      = 800   # Stop collecting after 800ms silence
     PRE_SPEECH_BUFFER_MS= 200   # Rolling buffer before speech onset
 
-    def __init__(self, on_speech_segment: Callable[[np.ndarray], None]):
+    def __init__(
+        self,
+        on_speech_segment: Callable[[np.ndarray], None],
+        is_speaking_fn: Optional[Callable[[], bool]] = None,
+    ):
         """
         Args:
             on_speech_segment: Called with a float32 numpy array of 16kHz audio
                                when a complete speech segment is detected.
+            is_speaking_fn: Optional callable returning True while Jarvis is speaking,
+                            used to suppress acoustic echo from laptop speakers.
         """
-        self._callback   = on_speech_segment
-        self._cfg        = load_config()
-        self._threshold  = self._cfg["audio"]["vad_threshold"]
-        self._device_idx = self._cfg["audio"]["input_device_index"]
+        self._callback       = on_speech_segment
+        self._is_speaking_fn = is_speaking_fn
+        self._cfg            = load_config()
+        self._threshold      = max(0.6, float(self._cfg["audio"]["vad_threshold"]))
+        self._device_idx     = self._cfg["audio"]["input_device_index"]
 
-        self._running     = False
+        self._running        = False
         self._thread: Optional[threading.Thread] = None
-        self._model       = None
-        self._model_state = None
+        self._model          = None
+        self._model_state    = None
+        self._last_speaker_active_time = 0.0
 
         # ── Barge-in support ─────────────────────────────────────────────
-        self._barge_in_enabled    = False
+        self._barge_in_enabled = False
         self._on_barge_in: Optional[Callable] = None
 
     # ──────────────────────────────────────────────────────────────────
@@ -144,6 +152,24 @@ class VADListener:
                 chunk, _ = stream.read(self.CHUNK_SAMPLES)
                 audio    = chunk.flatten()
 
+                # ── Echo Suppression: Never listen to Jarvis's own voice ──
+                now = time.time()
+                if self._is_speaking_fn and self._is_speaking_fn():
+                    self._last_speaker_active_time = now
+                    in_speech = False
+                    speech_chunks = []
+                    silence_chunks = 0
+                    pre_buf.clear()
+                    continue
+
+                if (now - self._last_speaker_active_time) < 0.5:
+                    # Dissipate room acoustic echo
+                    in_speech = False
+                    speech_chunks = []
+                    silence_chunks = 0
+                    pre_buf.clear()
+                    continue
+
                 # Silero VAD inference (in-process, ~1ms on CPU)
                 tensor   = torch.from_numpy(audio)
                 prob     = self._model(tensor, self.SAMPLE_RATE).item()
@@ -156,10 +182,6 @@ class VADListener:
                         in_speech     = True
                         silence_chunks= 0
                         speech_chunks = list(pre_buf)  # capture leading audio
-
-                        # Fire barge-in if Jarvis is currently speaking
-                        if self._barge_in_enabled and self._on_barge_in:
-                            self._on_barge_in()
 
                     speech_chunks.append(audio)
                     silence_chunks = 0
