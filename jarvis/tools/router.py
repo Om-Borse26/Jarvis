@@ -166,6 +166,16 @@ class ToolRouter:
                 res = await registry.execute("create_directory", path=folder_name)
                 return res.get("result", f"Created folder '{folder_name}', Sir.")
 
+        # 3. Folder deletion: "delete the demo folder", "delete folder test_app", "remove directory new_folder"
+        del_f = re.search(r"(?:delete|remove|erase|destroy)\s+(?:the\s+)?(?:dummy\s+)?(?:folder|directory)\s+([a-zA-Z0-9_\-\.\s]+?)(?:\s+for\s+me|\s+please)?$", clean_cmd)
+        if not del_f:
+            del_f = re.search(r"(?:delete|remove|erase|destroy)\s+(?:the\s+)?([a-zA-Z0-9_\-]+)\s+(?:folder|directory)(?:\s+for\s+me|\s+please)?$", clean_cmd)
+        if del_f:
+            folder_name = del_f.group(1).strip()
+            if folder_name.lower() not in ("a", "the", "my", "this", "all", "it"):
+                res = await registry.execute("delete_directory", path=folder_name)
+                return res.get("result", f"Deleted folder '{folder_name}', Sir.")
+
         # "open explorer", "open file explorer", "show in explorer"
         if any(eq in text for eq in ["open explorer", "open file explorer", "open in explorer", "show in explorer", "open this in explorer"]):
             res = await registry.execute("open_in_explorer", path=".")
@@ -332,13 +342,17 @@ class ToolRouter:
                 res = await registry.execute("launch_application", app_name=app_target)
                 return res.get("result", f"Opening {app_target}, Sir.")
 
-        # "close brave", "kill chrome", "exit discord", "stop blender"
-        kill_match = re.search(r"^(?:close|kill|terminate|exit|stop)\s+([a-zA-Z0-9_\-\.\s]+)$", clean_cmd)
+        # "close brave", "can you close vs code", "close vs code please", "close vs code if i ask it too", "exit discord", "stop blender"
+        kill_regex = r"(?:can\s+you\s+|could\s+you\s+|please\s+|just\s+|i\s+want\s+(?:you\s+)?to\s+)?(?:close|kill|terminate|exit|stop|shut\s*down)\s+(?:down\s+)?(?:all\s+)?(?:instances?\s+of\s+)?(?:the\s+)?([a-zA-Z0-9_\-\.\s]+?)(?:\s+for\s+me|\s+please|\s+if\s+i\s+ask(?:\s+it)?(?:\s+too)?|\s+now)?$"
+        kill_match = re.search(kill_regex, clean_cmd)
         if not kill_match:
-            kill_match = re.search(r"^(?:close|kill|terminate|exit|stop)\s+([a-zA-Z0-9_\-\.\s]+)$", text)
+            kill_match = re.search(kill_regex, text)
         if kill_match:
             app_target = kill_match.group(1).strip()
-            if not app_target.startswith(("music", "video", "listening", "mode")):
+            # Normalize common spoken variations
+            app_target = re.sub(r"\b(?:v\.s\.|v\.\s*s\.|v\s+s)\s*code\b", "vscode", app_target)
+            DISALLOWED_KILL = ["music", "video", "listening", "mode", "tab", "file", "folder", "screen", "dummy"]
+            if not any(dk in app_target for dk in DISALLOWED_KILL):
                 res = await registry.execute("kill_process", process_name=app_target)
                 return res.get("result", f"Closed {app_target}, Sir.")
 

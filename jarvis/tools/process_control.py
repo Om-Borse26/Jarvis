@@ -281,6 +281,31 @@ class DynamicAppResolver:
                 logger.info(f"🔄 Reusing active window '{existing_title}' instead of spawning duplicate.")
                 return f"Switched to your open {clean_q} window, Sir."
 
+            # Check if process is already running in background (e.g. still initializing window)
+            from jarvis.core.rules_engine import rules_engine
+            target_exe = rules_engine.resolve_process_name(clean_q)
+            target_exe_lower = target_exe.lower()
+
+            proc_running = False
+            for proc in psutil.process_iter(['name']):
+                try:
+                    pname = (proc.info['name'] or '').lower()
+                    if pname == target_exe_lower:
+                        if "antigravity" not in pname:
+                            proc_running = True
+                            break
+                except Exception:
+                    pass
+
+            if proc_running:
+                import time
+                for _ in range(5):
+                    time.sleep(0.5)
+                    existing_title = focus_existing_window(clean_q)
+                    if existing_title:
+                        return f"Switched to your open {clean_q} window, Sir."
+                return f"{clean_q} is already running in the background, Sir."
+
         match = self.resolve(query)
         if not match:
             return f"I could not find an application matching '{query}' installed on your PC, Sir."
@@ -319,27 +344,92 @@ def launch_application(app_name: str, force_new: bool = False) -> str:
     return app_resolver.launch(clean, force_new=force_new)
 
 
-@register_tool(name="kill_process", description="Terminate a running application or process by name (e.g. chrome, brave, blender).", category="process")
+@register_tool(name="kill_process", description="Terminate a running application or process by name (e.g. chrome, brave, blender, vs code, vscode).", category="process")
 def kill_process(process_name: str) -> str:
-    """Terminate a running process by name."""
-    target = process_name.lower().strip()
-    if not target.endswith(".exe"):
-        target_exe = target + ".exe"
-    else:
-        target_exe = target
+    """
+    Terminate a running application by name.
+    Uses the global PROCESS_NAME_MAP for intelligent name resolution:
+      "close vs code" → kills Code.exe
+      "close brave" → kills brave.exe
+      "close discord" → kills Discord.exe
+    Attempts graceful WM_CLOSE first, then force kills if needed.
+    """
+    from jarvis.core.rules_engine import rules_engine
 
+    target = process_name.lower().strip()
+    # Resolve spoken name to actual process name
+    target_exe = rules_engine.resolve_process_name(target)
+    target_exe_lower = target_exe.lower()
+
+    # Also match without .exe for fuzzy matching
+    target_base = target_exe_lower.replace(".exe", "")
+
+    # Step 1: Try graceful close via WM_CLOSE on windows
+    graceful_closed = 0
+    try:
+        import ctypes
+        import win32gui
+        import win32con
+
+        user32 = ctypes.windll.user32
+        hdesk = user32.OpenInputDesktop(0, False, 0x0100 | 0x0040)
+        if hdesk:
+            user32.SetThreadDesktop(hdesk)
+
+        def close_cb(hwnd, _):
+            nonlocal graceful_closed
+            if win32gui.IsWindowVisible(hwnd):
+                title = win32gui.GetWindowText(hwnd).lower()
+                # Match by known window title patterns
+                title_matches = {
+                    "code.exe": ["visual studio code", " - code"],
+                    "brave.exe": ["brave"],
+                    "chrome.exe": ["google chrome", "chrome"],
+                    "msedge.exe": ["microsoft edge", "edge"],
+                    "discord.exe": ["discord"],
+                    "spotify.exe": ["spotify"],
+                    "blender.exe": ["blender"],
+                }
+                patterns = title_matches.get(target_exe_lower, [target_base])
+                for pat in patterns:
+                    if pat in title and "antigravity" not in title:
+                        try:
+                            user32.PostMessageW(hwnd, win32con.WM_CLOSE, 0, 0)
+                            graceful_closed += 1
+                        except Exception:
+                            pass
+                        break
+            return True
+
+        win32gui.EnumWindows(close_cb, None)
+    except Exception as e:
+        logger.debug(f"Graceful close notice: {e}")
+
+    # Give windows time to exit gracefully
+    if graceful_closed > 0:
+        import time
+        time.sleep(0.6)
+
+    # Step 2: Force kill any remaining or background processes
     killed = 0
-    for proc in psutil.process_iter(['name']):
+    for proc in psutil.process_iter(['name', 'pid']):
         try:
             p_name = proc.info['name']
-            if p_name and (p_name.lower() == target_exe or target in p_name.lower()):
-                proc.kill()
-                killed += 1
+            if p_name:
+                p_lower = p_name.lower()
+                # Protect Antigravity IDE and MCP servers
+                if "antigravity" in p_lower or "codebase-memory" in p_lower:
+                    continue
+                if p_lower == target_exe_lower or (len(target_base) > 4 and target_base == p_lower.replace(".exe", "")):
+                    proc.kill()
+                    killed += 1
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
         except Exception:
             pass
 
-    if killed > 0:
-        return f"Terminated {killed} instances of {process_name}."
+    if graceful_closed > 0 or killed > 0:
+        return f"Closed {process_name}, Sir."
     return f"No running process found matching '{process_name}'."
 
 

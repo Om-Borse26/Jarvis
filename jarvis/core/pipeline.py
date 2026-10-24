@@ -38,6 +38,7 @@ from jarvis.audio.speaker_id import speaker_id
 import jarvis.tools  # Automatically registers all tools & plugins
 from jarvis.tools.registry import registry
 from jarvis.tools.router   import ToolRouter
+from jarvis.core.agent_loop import AgentLoop
 from jarvis.audio.accent_normalizer import SpeechNormalizer
 
 
@@ -59,6 +60,7 @@ class JarvisPipeline:
         self.arbiter     = SteerArbiter(self.tts, self.llm)
         self.screen_tool = ScreenTool()
         self.tool_router = ToolRouter()
+        self.agent_loop  = AgentLoop(self.llm, speak_fn=self._speak_async)
         self.speaker_id  = speaker_id
         self.vad         = VADListener(
             on_speech_segment=self._on_speech_segment,
@@ -165,6 +167,7 @@ class JarvisPipeline:
             logger.info("🛑 Hotkey pressed during speech — interrupting playback.")
             self.tts.interrupt()
             self._cancel_llm.set()
+            self.agent_loop.cancel()
 
         self._listening = True
         self._listening_timestamp = time.time()
@@ -191,6 +194,7 @@ class JarvisPipeline:
         """Called when user explicitly interrupts."""
         self.arbiter.on_barge_in()
         self._cancel_llm.set()
+        self.agent_loop.cancel()
         self._listening = True
         self._listening_timestamp = time.time()
 
@@ -409,30 +413,20 @@ class JarvisPipeline:
                 # Process end of stream
                 full_resp = "".join(response_buffer).strip()
                 if is_tool_call_stream:
-                    parsed = self.tool_router.parse_tool_call(full_resp)
-                    if parsed:
-                        tool_name, args = parsed
-                        logger.info(f"⚙️ Executing LLM tool call: {tool_name}({args})")
-                        exec_res = await registry.execute(tool_name, **args)
-                        raw_result = exec_res.get("result", exec_res.get("message", "Action completed."))
-
-                        # Generate a crisp, 1-sentence spoken confirmation
-                        confirm_prompt = (
-                            f"System note: Tool '{tool_name}' completed with output:\n{raw_result}\n\n"
-                            f"Deliver a crisp, 1-sentence spoken confirmation to {self._user_name}."
-                        )
-                        confirm_buf = []
-                        async for tok in self.llm.stream(
-                            system_prompt = system_prompt,
-                            user_message  = confirm_prompt,
-                            model         = self.llm._fast_model,
-                            cancel_event  = self._cancel_llm,
-                        ):
-                            confirm_buf.append(tok)
-                        spoken_confirm = "".join(confirm_buf).strip() or str(raw_result)
+                    logger.info(f"🤖 Multi-step / tool workflow initiated via AgentLoop for: '{text}'")
+                    spoken_confirm = await self.agent_loop.run(
+                        user_request=text,
+                        user_name=self._user_name,
+                        current_time=datetime.datetime.now().strftime("%H:%M"),
+                        active_app=self._active_app,
+                        mood=mood_state.mood,
+                        conversation_history=self._conversation_history,
+                    )
+                    if spoken_confirm and not self._cancel_llm.is_set():
+                        logger.info(f"🤖 Jarvis: {spoken_confirm}")
                         await asyncio.to_thread(self.tts.speak, spoken_confirm, False)
-                        response_buffer.clear()
-                        response_buffer.append(spoken_confirm)
+                    response_buffer.clear()
+                    response_buffer.append(spoken_confirm)
                 elif pending.strip() and not self._cancel_llm.is_set():
                     await asyncio.to_thread(self.tts.speak, pending.strip(), False)
 

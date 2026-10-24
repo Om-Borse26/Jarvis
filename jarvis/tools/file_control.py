@@ -232,9 +232,10 @@ def create_directory(path: str, in_vscode: bool = False) -> str:
         from jarvis.tools.process_control import focus_existing_window
 
         if in_vscode:
-            from jarvis.tools.process_control import focus_existing_window, app_resolver
+            from jarvis.tools.process_control import focus_existing_window
+            import psutil
 
-            # Check if VS Code is currently running
+            # Check if VS Code process or window is active
             vscode_title = focus_existing_window("vscode")
             active_ws = get_active_vscode_workspace()
 
@@ -244,26 +245,26 @@ def create_directory(path: str, in_vscode: bool = False) -> str:
                 focus_existing_window("vscode")
                 return f"Created folder '{clean_p}' inside your active VS Code workspace ({active_ws.name}), Sir."
 
-            # Either VS Code is open with empty window, or VS Code is NOT open at all
+            # Create on Desktop
             desktop = Path.home() / "Desktop"
             target = desktop / clean_p
             target.mkdir(parents=True, exist_ok=True)
             resolved_path = str(target.resolve())
 
-            match = app_resolver.resolve("vs code")
-            exe_target = match[2] if match else "code"
+            # Check if Code.exe is running in background
+            is_running = any(
+                p.info['name'] and p.info['name'].lower() == "code.exe"
+                for p in psutil.process_iter(['name'])
+            )
 
-            if vscode_title:
-                # VS Code is open with empty window -> reuse window
+            if vscode_title or is_running:
+                # Reuse existing window with -r
                 subprocess.Popen(f'code -r "{resolved_path}"', shell=True)
                 focus_existing_window("vscode")
                 return f"Created folder '{clean_p}' on your Desktop and opened it in your active VS Code window, Sir."
             else:
-                # VS Code is NOT open -> launch VS Code directly opening this folder
-                if Path(exe_target).exists():
-                    subprocess.Popen(f'"{exe_target}" "{resolved_path}"', shell=True)
-                else:
-                    subprocess.Popen(f'code "{resolved_path}"', shell=True)
+                # Fresh launch opening this folder
+                subprocess.Popen(f'code "{resolved_path}"', shell=True)
                 focus_existing_window("vscode")
                 return f"Created folder '{clean_p}' on your Desktop and launched VS Code with it, Sir."
 
@@ -285,12 +286,161 @@ def delete_file(file_path: str) -> str:
     clean_p = file_path.strip('"').strip("'").strip()
     try:
         p = Path(clean_p)
+        # Check active workspace
+        if not p.is_absolute() or not p.exists():
+            ws = get_active_vscode_workspace()
+            if ws:
+                cand = ws / clean_p
+                if cand.exists():
+                    p = cand
+            if not p.exists():
+                desk_cand = Path.home() / "Desktop" / clean_p
+                if desk_cand.exists():
+                    p = desk_cand
+
         if not p.exists():
             return f"File '{clean_p}' does not exist."
         if p.is_dir():
-            return f"'{clean_p}' is a directory, not a file."
+            return f"'{clean_p}' is a directory, not a file. Use delete_directory instead."
         p.unlink()
         return f"Deleted file '{clean_p}', Sir."
     except Exception as e:
         return f"Failed to delete file '{clean_p}': {e}"
+
+
+@register_tool(
+    name="delete_directory",
+    description="Delete a folder/directory and all its contents recursively. Moves to recycle bin when possible for safety.",
+    category="filesystem"
+)
+def delete_directory(path: str, force: bool = False) -> str:
+    """Delete a directory and all contents. Tries recycle bin first for safety."""
+    import shutil
+
+    clean_p = path.strip('"').strip("'").strip()
+    target = Path(clean_p)
+
+    # Check if it's a relative path in the active VS Code workspace
+    if not target.is_absolute() or not target.exists():
+        ws = get_active_vscode_workspace()
+        if ws:
+            candidate = ws / clean_p
+            if candidate.exists():
+                target = candidate
+        # Check Desktop
+        if not target.exists():
+            desktop_cand = Path.home() / "Desktop" / clean_p
+            if desktop_cand.exists():
+                target = desktop_cand
+        # Check COMMON_DIRS
+        if not target.exists():
+            for cdir in COMMON_DIRS:
+                cand = cdir / clean_p
+                if cand.exists():
+                    target = cand
+                    break
+
+    if not target.exists():
+        return f"Directory '{clean_p}' does not exist."
+    if not target.is_dir():
+        return f"'{clean_p}' is a file, not a directory. Use delete_file instead."
+
+    # Safety: block deleting critical system directories
+    protected = [
+        Path.home(),
+        Path("C:/Windows"),
+        Path("C:/Program Files"),
+        Path("C:/Program Files (x86)"),
+        Path.home() / "Desktop",
+        Path.home() / "Documents",
+        Path.home() / "Downloads",
+    ]
+    if any(target.resolve() == p.resolve() for p in protected):
+        return f"Cannot delete protected directory '{target}'. This is a safety restriction."
+
+    try:
+        # Try to send to recycle bin first (safe delete)
+        try:
+            from send2trash import send2trash
+            send2trash(str(target.resolve()))
+            return f"Moved folder '{target.name}' to recycle bin, Sir."
+        except ImportError:
+            pass
+
+        # Fallback: permanent delete
+        item_count = sum(1 for _ in target.rglob("*"))
+        shutil.rmtree(str(target))
+        return f"Deleted folder '{target.name}' ({item_count} items removed), Sir."
+
+    except Exception as e:
+        return f"Failed to delete directory '{clean_p}': {e}"
+
+
+@register_tool(
+    name="rename_path",
+    description="Rename a file or folder to a new name.",
+    category="filesystem"
+)
+def rename_path(old_path: str, new_name: str) -> str:
+    """Rename a file or folder."""
+    clean_p = old_path.strip('"').strip("'").strip()
+    clean_name = new_name.strip('"').strip("'").strip()
+    try:
+        source = Path(clean_p)
+        if not source.exists():
+            return f"'{clean_p}' does not exist."
+        dest = source.parent / clean_name
+        if dest.exists():
+            return f"'{clean_name}' already exists in the same directory."
+        source.rename(dest)
+        return f"Renamed '{source.name}' to '{clean_name}', Sir."
+    except Exception as e:
+        return f"Failed to rename: {e}"
+
+
+@register_tool(
+    name="move_path",
+    description="Move a file or folder to a different location.",
+    category="filesystem"
+)
+def move_path(source: str, destination: str) -> str:
+    """Move a file or folder to a new location."""
+    import shutil
+    clean_src = source.strip('"').strip("'").strip()
+    clean_dst = destination.strip('"').strip("'").strip()
+    try:
+        src = Path(clean_src)
+        dst = Path(clean_dst)
+        if not src.exists():
+            return f"Source '{clean_src}' does not exist."
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dst))
+        return f"Moved '{src.name}' to '{dst}', Sir."
+    except Exception as e:
+        return f"Failed to move: {e}"
+
+
+@register_tool(
+    name="copy_path",
+    description="Copy a file or folder to a different location.",
+    category="filesystem"
+)
+def copy_path(source: str, destination: str) -> str:
+    """Copy a file or folder to a new location."""
+    import shutil
+    clean_src = source.strip('"').strip("'").strip()
+    clean_dst = destination.strip('"').strip("'").strip()
+    try:
+        src = Path(clean_src)
+        dst = Path(clean_dst)
+        if not src.exists():
+            return f"Source '{clean_src}' does not exist."
+        if src.is_file():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(src), str(dst))
+        else:
+            shutil.copytree(str(src), str(dst))
+        return f"Copied '{src.name}' to '{dst}', Sir."
+    except Exception as e:
+        return f"Failed to copy: {e}"
 
