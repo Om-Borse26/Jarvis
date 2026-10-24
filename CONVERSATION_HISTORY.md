@@ -4539,6 +4539,28 @@ Both requests have been executed:
 | `fb4ccbc` | Eve companion logic, token-authenticated LAN sync server, and phone PWA. |
 | `c9532c6` | Fixed duplicate `[mcp]` and `[eve]` TOML tables that prevented settings from loading; added 44 automated tests and ignored runtime-generated permission/registry config. |
 
+### Why this work happened (starting critique)
+
+Before any of the commits above, the session began with a gap analysis of the existing codebase. The main problems identified and then addressed were: the pipeline called the LLM twice and parsed tool calls from free text (fragile); MCP was configured but never actually run; intent relied heavily on regex; there was no computer-use grounding, no real tiered memory, no consent/safety gate, no secrets/credentials handling, no proactivity, and no real UI; there were also two separate memory implementations. Each phase below maps to one of those gaps. The target architecture is described in `docs/jarvis_complete_architecture_v4.md`.
+
+### Per-phase detail (why / key files / expected behavior)
+
+1. **Native reasoning** (`dfbf6c3`) — Why: remove the double LLM call and fragile text tool-parsing. Key files: `jarvis/tools/registry.py` (`get_tools_schema`), `jarvis/brain/ollama_client.py` (`chat_with_tools`, `_normalize_tool_response`), `jarvis/core/agent_loop.py`, `jarvis/core/pipeline.py`. Expect: one tool-aware decision then a ReAct loop using native `tool_calls`; a legacy `TOOL_CALL:` text fallback still parses if the model doesn't emit native calls.
+2. **Vault + audit** (`4180a25`) — Why: no encrypted secret storage or action trail. Key files: `jarvis/security/vault.py`, `jarvis/security/audit.py`; audit hook in `registry.execute`. Expect: DPAPI backend on Windows; `save_secret`/`list_secrets`; `data/logs/audit.jsonl` appends with secret redaction.
+3. **Consent gate** (`a6a4014`) — Why: destructive actions ran with no confirmation. Key files: `jarvis/security/consent.py`; wiring in `agent_loop.py`, `tools/router.py`, `pipeline.py`. Expect: high-risk tools ask a yes/no; barge-in does not cancel a pending confirmation.
+4. **Credential access + auto-fill** (`9c4a30b`) — Key files: `jarvis/security/harvester.py`; credentials table in `vault.py`. Expect: `import_credentials`, `find_login`, `autofill_login` (types into the focused field).
+5. **Hybrid credentials** (`cf95ab7`) — Why: avoid keeping a second copy of all browser passwords. Key files: `harvester.py` (`lookup_browser_login`). Expect: auto-fill prefers on-demand browser decryption; bulk import defaults to Windows Credential Manager only.
+6. **MCP runtime** (`97a8782`) — Key files: `jarvis/tools/mcp_runtime.py`, `registry.register_external`, `[mcp] autostart_servers`. Expect: configured Playwright server auto-starts and its tools appear as `playwright_*`; `connect_mcp_server` connects others on demand. Requires Node/npm and network on first run.
+7. **Tiered memory** (`3b5055c`) — Key files: `jarvis/memory/working.py`, `episodic.py`, `semantic.py`; integration in `core/memory.py`, `pipeline.py`, `agent_loop.py`. Expect: live context + related past interactions injected into prompts; semantic recall with keyword fallback when embeddings are unavailable.
+8. **Computer-use grounding** (`87de969`) — Key file: `jarvis/tools/computer_use.py`. Expect: `label_screen_elements` + `click_labeled_element` and `click_text` click real OCR-detected elements instead of guessed coordinates; needs pytesseract/easyocr; watch DPI scaling.
+9. **Scheduler** (`62171cd`) — Key file: `jarvis/core/scheduler.py`. Expect: `set_reminder`, `set_recurring_task`, `list_reminders`, `cancel_reminder`; persistent across restarts.
+10. **Smart missed jobs + meetings + Eve bus** (`886e4ba`) — Key files: `scheduler.py` (`reconcile_missed`, `schedule_meeting`), `jarvis/memory/shared_bus.py`. Expect: normal missed reminders are not replayed (handed to Eve), important/critical still-relevant ones resurface, recurring jobs fast-forward, meetings remind `lead_minutes` before.
+11. **Lifecycle + permission gate** (`3163a3e`) — Key files: `jarvis/core/permissions.py`, `jarvis/core/lifecycle.py`, `jarvis/ui/launcher.py`, `jarvis/ui/tray.py`. Expect: one instance only; `stop_jarvis`; Windows startup toggle; Win+J launcher; disabled tool categories are hard-blocked in `registry.execute` and there is deliberately NO tool to grant permissions.
+12. **UI state + orb + dashboard** (`a4afa10`) — Key files: `jarvis/ui/state.py`, `server.py`, `orb.py`, `web/orb.html`, `web/dashboard.html`. Expect: orb animates by idle/listening/thinking/speaking; dashboard shows permission toggles, reminders, history, audit, startup toggle, and Stop.
+13. **HUD** (`e3ab56c`) — Key files: `jarvis/hud/manager.py`, `window.py`, `web/hud.html`. Expect: notification toasts and an Approve/Decline card that resolves the same consent request as voice.
+14. **Eve companion** (`fb4ccbc`) — Key files: `jarvis/eve/companion.py`, `server.py`, `web/eve.html`. Expect: token-authenticated LAN server + phone PWA; phone notes/tasks reach Jarvis via the shared bus; Jarvis announces queued items on startup. Note the PC-off limitation described later.
+15. **Config fix + tests** (`c9532c6`) — see the audit section below.
+
 ### Audit and verification performed
 
 - The first unit-test run found a real startup blocker: `config/settings.toml` declared `[mcp]` and `[eve]` twice. `tomllib` raised `TOMLDecodeError: Cannot declare ('mcp',) twice`. The tables were merged in `c9532c6`.
