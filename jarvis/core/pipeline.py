@@ -32,6 +32,9 @@ from jarvis.brain.ollama_client import OllamaClient
 from jarvis.core.arbiter  import SteerArbiter
 from jarvis.core.config   import load_config
 from jarvis.tools.screen_tool import ScreenTool
+import jarvis.tools  # Automatically registers all tools & plugins
+from jarvis.tools.registry import registry
+from jarvis.tools.router   import ToolRouter
 
 
 class JarvisPipeline:
@@ -51,6 +54,7 @@ class JarvisPipeline:
         self.llm         = OllamaClient()
         self.arbiter     = SteerArbiter(self.tts, self.llm)
         self.screen_tool = ScreenTool()
+        self.tool_router = ToolRouter()
         self.vad         = VADListener(
             on_speech_segment=self._on_speech_segment,
             is_speaking_fn=lambda: self.tts.is_speaking,
@@ -279,6 +283,19 @@ class JarvisPipeline:
             self._listening = False
             logger.info(f"👤 User: {text}")
 
+            # ── 1. Fast-path intent check (< 1ms instant OS execution) ────
+            fast_resp = await self.tool_router.try_fast_path(text)
+            if fast_resp:
+                logger.info(f"⚡ Fast-path action executed: {fast_resp}")
+                await self._speak_async(fast_resp)
+                self._listening = True
+                self._listening_timestamp = time.time()
+                self._conversation_history.extend([
+                    {"role": "user",      "content": text},
+                    {"role": "assistant", "content": fast_resp},
+                ])
+                return
+
             # Check for screen / vision command
             lower_query = text.lower()
             screen_keywords = ["screenshot", "screen", "what do you see", "look at my screen", "what's on my screen", "what is on my screen", "see my screen", "read my screen"]
@@ -291,7 +308,7 @@ class JarvisPipeline:
             mood_state = self.mood.current_mood
             asyncio.create_task(asyncio.to_thread(self.mood.analyze, audio))
 
-            # ── 3. Build prompt (steer-aware) ────────────────────────────
+            # ── 3. Build prompt (steer-aware + tools schema) ──────────────
             system_prompt, user_msg = self.arbiter.build_prompt(
                 new_user_input = text,
                 user_name      = self._user_name,
@@ -300,14 +317,18 @@ class JarvisPipeline:
                 mood           = mood_state.mood,
                 tone_guidance  = mood_state.tone_guidance,
             )
+            # Inject dynamic registered tool capabilities for LLM
+            system_prompt += self.tool_router.get_tool_prompt_section()
 
             # ── 4. Stream LLM response → TTS ─────────────────────────────
             self._cancel_llm.clear()
             response_buffer = []
 
             async def stream_to_tts():
-                """Stream tokens and speak in natural sentence chunks."""
+                """Stream tokens, detect tool calls, and speak in natural chunks."""
                 pending = ""
+                is_tool_call_stream = False
+
                 async for token in self.llm.stream(
                     system_prompt = system_prompt,
                     user_message  = user_msg,
@@ -317,21 +338,49 @@ class JarvisPipeline:
                     response_buffer.append(token)
                     pending += token
 
-                    # Speak sentence-by-sentence as tokens arrive
-                    if any(pending.rstrip().endswith(p) for p in [".", "!", "?"]):
-                        clean_candidate = pending.strip()
-                        # Avoid splitting on common abbreviations
-                        if len(clean_candidate) >= 15 and not clean_candidate.endswith(("Mr.", "Dr.", "e.g.", "vs.", "i.e.")):
-                            sentence = clean_candidate
-                            pending  = ""
-                            if sentence:
-                                logger.debug(f"🤖 Jarvis: {sentence}")
-                                await asyncio.to_thread(
-                                    self.tts.speak, sentence, False
-                                )
+                    accumulated = "".join(response_buffer).strip()
+                    if "TOOL_CALL:" in accumulated or accumulated.startswith("TOOL_"):
+                        is_tool_call_stream = True
 
-                # Speak any remaining fragment
-                if pending.strip() and not self._cancel_llm.is_set():
+                    # If this is regular conversational text, stream sentence-by-sentence to TTS
+                    if not is_tool_call_stream:
+                        if any(pending.rstrip().endswith(p) for p in [".", "!", "?"]):
+                            clean_candidate = pending.strip()
+                            if len(clean_candidate) >= 15 and not clean_candidate.endswith(("Mr.", "Dr.", "e.g.", "vs.", "i.e.")):
+                                sentence = clean_candidate
+                                pending = ""
+                                if sentence:
+                                    logger.debug(f"🤖 Jarvis: {sentence}")
+                                    await asyncio.to_thread(self.tts.speak, sentence, False)
+
+                # Process end of stream
+                full_resp = "".join(response_buffer).strip()
+                if is_tool_call_stream:
+                    parsed = self.tool_router.parse_tool_call(full_resp)
+                    if parsed:
+                        tool_name, args = parsed
+                        logger.info(f"⚙️ Executing LLM tool call: {tool_name}({args})")
+                        exec_res = await registry.execute(tool_name, **args)
+                        raw_result = exec_res.get("result", exec_res.get("message", "Action completed."))
+
+                        # Generate a crisp, 1-sentence spoken confirmation
+                        confirm_prompt = (
+                            f"System note: Tool '{tool_name}' completed with output:\n{raw_result}\n\n"
+                            f"Deliver a crisp, 1-sentence spoken confirmation to {self._user_name}."
+                        )
+                        confirm_buf = []
+                        async for tok in self.llm.stream(
+                            system_prompt = system_prompt,
+                            user_message  = confirm_prompt,
+                            model         = self.llm._fast_model,
+                            cancel_event  = self._cancel_llm,
+                        ):
+                            confirm_buf.append(tok)
+                        spoken_confirm = "".join(confirm_buf).strip() or str(raw_result)
+                        await asyncio.to_thread(self.tts.speak, spoken_confirm, False)
+                        response_buffer.clear()
+                        response_buffer.append(spoken_confirm)
+                elif pending.strip() and not self._cancel_llm.is_set():
                     await asyncio.to_thread(self.tts.speak, pending.strip(), False)
 
             await stream_to_tts()
