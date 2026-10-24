@@ -28,6 +28,33 @@ except ImportError:
     pyautogui = None
 
 
+# When the Windows session is locked, the compositor (DWM) blocks desktop capture,
+# so screenshots come back black. Detect it and return a clear message instead.
+_LOCKED_MSG = (
+    "I can't see the screen right now because your workstation is locked. "
+    "Please unlock it and ask me again."
+)
+
+
+def _is_session_locked() -> bool:
+    """Best-effort check for a locked/secure Windows desktop. Never raises."""
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        # DESKTOP_READOBJECTS (0x0001); the input desktop can't be opened when locked.
+        hdesk = user32.OpenInputDesktop(0, False, 0x0001)
+        if not hdesk:
+            return True
+        name_buf = ctypes.create_unicode_buffer(256)
+        needed = ctypes.c_ulong(0)
+        # UOI_NAME = 2: the secure desktop is named "Winlogon", the normal one "Default".
+        user32.GetUserObjectInformationW(hdesk, 2, name_buf, ctypes.sizeof(name_buf), ctypes.byref(needed))
+        user32.CloseDesktop(hdesk)
+        return name_buf.value.strip().lower() != "default"
+    except Exception:
+        return False  # on any uncertainty, don't block capture
+
+
 # ─── Screen Capture ───────────────────────────────────────────────────────────
 
 @register_tool(
@@ -37,6 +64,8 @@ except ImportError:
 )
 def screenshot(region: str = "") -> str:
     """Capture screen. region format: 'x,y,width,height' or empty for full screen."""
+    if _is_session_locked():
+        return _LOCKED_MSG
     try:
         import pyautogui
         from PIL import Image
@@ -70,6 +99,8 @@ def screenshot(region: str = "") -> str:
 )
 def ocr_screen() -> str:
     """Extract text from current screen content."""
+    if _is_session_locked():
+        return _LOCKED_MSG
     try:
         import pyautogui
         from PIL import Image
@@ -214,6 +245,8 @@ def _capture_and_detect() -> tuple[object, list[dict]]:
 )
 def click_text(text: str, double: bool = False, right: bool = False) -> str:
     """Find the element whose text matches and click its center."""
+    if _is_session_locked():
+        return _LOCKED_MSG
     try:
         import pyautogui
         _img, els = _capture_and_detect()
@@ -242,6 +275,8 @@ def click_text(text: str, double: bool = False, right: bool = False) -> str:
 )
 def label_screen_elements(max_elements: int = 40) -> str:
     """Produce a numbered list of on-screen text elements for precise selection."""
+    if _is_session_locked():
+        return _LOCKED_MSG
     try:
         img, els = _capture_and_detect()
         els = els[:max_elements]

@@ -271,6 +271,12 @@ class JarvisPipeline:
     async def _handle_screen_request(self) -> str:
         """Capture desktop screen and extract real active window, process, and OCR content."""
         try:
+            from jarvis.tools.computer_use import _is_session_locked
+            if _is_session_locked():
+                return (
+                    "[LIVE DESKTOP SCREEN CONTEXT]: The workstation is locked, so I cannot see the screen. "
+                    f"Tell {self._user_name} to unlock it so you can look."
+                )
             img_path = await asyncio.to_thread(self.screen_tool.capture_screen, False)
             active_title = "Desktop"
             try:
