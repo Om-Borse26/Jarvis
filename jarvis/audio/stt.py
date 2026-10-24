@@ -35,6 +35,15 @@ class STTEngine:
 
     def load(self):
         """Load the Whisper model. Call once at startup."""
+        import os
+        torch_lib = Path(__file__).resolve().parent.parent.parent / ".venv" / "Lib" / "site-packages" / "torch" / "lib"
+        if torch_lib.exists():
+            try:
+                os.add_dll_directory(str(torch_lib))
+            except Exception:
+                pass
+            os.environ["PATH"] = str(torch_lib) + os.pathsep + os.environ.get("PATH", "")
+
         from faster_whisper import WhisperModel
 
         logger.info(f"Loading Faster-Whisper: {self._model_name} on {self._device}...")
@@ -58,17 +67,17 @@ class STTEngine:
             audio: numpy float32 array at 16000 Hz sample rate
 
         Returns:
-            Transcribed text string (stripped, lowercased first char).
+            Transcribed text string.
         """
         if self._model is None:
             raise RuntimeError("STTEngine not loaded. Call .load() first.")
 
-        if len(audio) < 16000 * 0.3:  # Under 300ms is too short for real speech
+        if len(audio) < 16000 * 0.35:  # Under 350ms is too short for real speech
             return ""
 
         # Reject low-energy background silence / fan noise
         rms = float(np.sqrt(np.mean(audio**2)))
-        if rms < 0.008:
+        if rms < 0.006:
             return ""
 
         t0 = time.perf_counter()
@@ -83,20 +92,21 @@ class STTEngine:
             no_speech_threshold=0.6,
         )
 
-        if info.no_speech_prob > 0.65:
-            return ""
-
-        text = " ".join(seg.text for seg in segments).strip()
-
-        # Filter out common low-confidence ghost phrases
+        valid_texts = []
         ghost_phrases = {"thank you.", "thanks for watching.", "you", "bye.", "goodbye."}
-        if text.lower() in ghost_phrases:
-            return ""
+        for seg in segments:
+            no_speech = getattr(seg, "no_speech_prob", 0.0)
+            if no_speech < 0.65:
+                clean_seg = seg.text.strip()
+                if clean_seg and clean_seg.lower() not in ghost_phrases:
+                    valid_texts.append(clean_seg)
+
+        text = " ".join(valid_texts).strip()
 
         elapsed = (time.perf_counter() - t0) * 1000
         logger.debug(
             f"STT: '{text[:80]}{'...' if len(text)>80 else ''}' "
-            f"[{elapsed:.0f}ms, lang={info.language}, no_speech_prob={info.no_speech_prob:.2f}]"
+            f"[{elapsed:.0f}ms, lang={info.language}]"
         )
 
         return text
