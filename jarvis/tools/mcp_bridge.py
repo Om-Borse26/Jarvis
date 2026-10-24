@@ -19,6 +19,11 @@ from typing import Optional, Dict, Any, List
 from loguru import logger
 from jarvis.tools.registry import register_tool, registry
 
+try:
+    import pypdf
+except ImportError:
+    pypdf = None
+
 CONFIG_PATH = Path("config/mcp_servers.json")
 GLOBAL_CONFIG_PATH = Path(r"C:\Users\ombor\.gemini\config\mcp_config.json")
 
@@ -96,13 +101,14 @@ def read_document_markitdown(file_path: str, max_chars: int = 4000) -> str:
             return f"### Document Content ({p.name}):\n\n{trimmed}"
 
         elif suffix == ".pdf":
-            # Extract PDF text using PyPDF2 or pypdf if available, else fallback
-            try:
-                import pypdf
-                reader = pypdf.PdfReader(str(p))
-                text = "\n".join([page.extract_text() or "" for page in reader.pages[:10]])
-                return f"### PDF Summary ({p.name}, {len(reader.pages)} pages):\n\n{text[:max_chars]}"
-            except ImportError:
+            if pypdf is not None:
+                try:
+                    reader = pypdf.PdfReader(str(p))
+                    text = "\n".join([page.extract_text() or "" for page in reader.pages[:10]])
+                    return f"### PDF Summary ({p.name}, {len(reader.pages)} pages):\n\n{text[:max_chars]}"
+                except Exception as e:
+                    return f"Error extracting text from PDF '{p.name}': {e}"
+            else:
                 return f"PDF '{p.name}' found ({p.stat().st_size} bytes). PyPDF reader can be installed for full text parsing."
 
         elif suffix in [".xlsx", ".xls"]:
