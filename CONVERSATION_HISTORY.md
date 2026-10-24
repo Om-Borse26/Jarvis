@@ -4507,3 +4507,91 @@ Both requests have been executed:
    - Generated [`CONVERSATION_HISTORY.md`](file:///d:/02_Interests%20%28Up%20Skilling%20%29/04_Projects/08_Jarvis/CONVERSATION_HISTORY.md) in the project root containing all prompts, diagnostics, code fixes, and architectural plans.
 
 ---
+
+## Development Continuation After Turn 37 — Implementation, Audit & Testing Handoff
+
+> **Purpose:** Bring a future coding agent up to date before Om performs full PC/phone testing. The implementation commits below have been pushed to `origin/dev`. This section records what was actually changed and what has only been statically/unit tested; it does not claim that Windows, GPU, Ollama, MCP, overlay, or phone behavior has been exercised end-to-end.
+
+### User's working agreement
+
+- Continue development on `dev`; do not work directly on `main`.
+- This coding environment lacks the project's Windows/GPU/model runtime. Make changes here, push to `dev`, and Om tests on his PC/phone and reports findings.
+- The user prioritizes local/private operation, explicit control over Jarvis's permissions, confirmation for risky actions, and incremental testing before adding more features.
+- The repository was pushed successfully after the earlier environment credential issue. At the end of this continuation, `dev` and `origin/dev` were both at `c9532c6` and the working tree was clean.
+
+### Implemented commits (oldest to newest)
+
+| Commit | Work |
+|---|---|
+| `dfbf6c3` | Native Ollama function-call schemas in the registry; `chat_with_tools`; ReAct loop and pipeline changed to make one initial tool-aware decision and seed the agent loop instead of calling the LLM twice. |
+| `4180a25` | DPAPI/Fernet-keyring encrypted secrets vault and append-only JSONL audit logger. |
+| `a6a4014` | Voice yes/no consent manager; high-risk agent actions and fast-path delete/kill actions request confirmation. |
+| `9c4a30b` | Structured login vault, Chromium/Windows Credential Manager credential access, and focused-field auto-fill. |
+| `cf95ab7` | Hybrid credential approach: Brave/Chrome/Edge lookup decrypts on demand; browser passwords are not copied by default; vault fallback remains. |
+| `97a8782` | Stdio JSON-RPC MCP client/manager, runtime tool discovery/registration, on-demand server connection, startup/shutdown wiring. |
+| `3b5055c` | L2 working, L3 episodic SQLite, and L4 semantic memory; pipeline/agent integration. |
+| `87de969` | OCR bounding-box visual grounding, `click_text`, and numbered set-of-marks tools. |
+| `62171cd` | Persistent reminder/recurring-task scheduler and pipeline lifecycle wiring. |
+| `886e4ba` | Missed-job policy, meeting lead-time reminders, and SQLite Jarvis/Eve shared bus. |
+| `3163a3e` | User-owned permission policy enforced in `registry.execute`, single-instance/self-shutdown/startup controls, Win+J launcher, and system tray. |
+| `a4afa10` | UI state bridge, local control server, desktop orb, dashboard, permission toggles, reminders/history/audit, and startup/stop controls. |
+| `e3ab56c` | HUD notification overlay and visual Approve/Decline confirmation card connected to the consent manager. |
+| `fb4ccbc` | Eve companion logic, token-authenticated LAN sync server, and phone PWA. |
+| `c9532c6` | Fixed duplicate `[mcp]` and `[eve]` TOML tables that prevented settings from loading; added 44 automated tests and ignored runtime-generated permission/registry config. |
+
+### Audit and verification performed
+
+- The first unit-test run found a real startup blocker: `config/settings.toml` declared `[mcp]` and `[eve]` twice. `tomllib` raised `TOMLDecodeError: Cannot declare ('mcp',) twice`. The tables were merged in `c9532c6`.
+- Added `tests/conftest.py` and `tests/unit/` tests covering config, permission policy, consent interpretation, scheduler parsing/CRUD/missed-job relevance, audit redaction, shared bus, registry schemas/permission enforcement, memory layers, Ollama response normalization, and tool registration.
+- Verification in this environment: `python -m pytest tests/unit -q` -> **44 passed**. Full `import jarvis.tools` registered 99 tools; `import jarvis.core.pipeline` succeeded with the test environment's infrastructure stubs.
+- Environment was Python 3.14.7 with `numpy`, and `loguru`/`pytest` installed for these checks. It did not have the project's Python 3.12 environment, Ollama, CUDA/PyTorch, actual Windows automation backends, or a phone. Therefore this is logic/import validation, not end-to-end runtime validation.
+- Tests are committed and pushed on `dev`; recommended command in the project environment: `uv run pytest tests/unit -q`.
+
+### Important security caveat before testing real credentials
+
+`registry.execute()` currently logs the raw tool arguments at INFO before calling the audit redaction hook. Calls such as `save_secret(value=...)` can therefore put a plaintext credential in the normal application log even though `audit.jsonl` redacts it. **Do not test with real passwords/tokens until this logging issue is fixed and verified.** The next agent should redact sensitive arguments before normal logging and add a regression test that checks both audit and application logs. Also review how the Eve pairing token is logged/stored before exposing the LAN service beyond a trusted home network.
+
+### PC setup before manual testing
+
+Use the repo's declared Python 3.12 environment; do not use the system Python 3.14 for the application:
+
+```powershell
+cd C:\Work\Jarvis
+git checkout dev
+uv venv --python 3.12
+uv sync
+uv run pytest tests/unit -q
+```
+
+Ensure Ollama is running and the configured models are pulled. Keep downloaded models in the ignored `models/` directory. Start with `uv run python main.py`. The dashboard defaults to `http://127.0.0.1:8787/`; the orb/HUD are launched according to `[ui]` settings. `config/permissions.json` is created at runtime and ignored by git. Start with destructive, credential, and outgoing-action permissions disabled until their safety behavior is verified.
+
+### Phone setup for Eve
+
+1. Start Jarvis on the PC and keep the phone on the same trusted Wi-Fi network.
+2. Read the `[Eve] Companion reachable at http://<PC-LAN-IP>:8765/eve` URL and pairing token from the PC log.
+3. Open that URL on the phone, enter the token, and test a harmless message/note first.
+4. If the phone cannot connect, inspect Windows Firewall for the configured Eve port. Do not expose the service to public networks; it is intended for a trusted LAN.
+
+**Important limitation:** Eve is currently hosted by Jarvis on the PC. If the PC is powered off, the Eve server and Ollama are also off, so there is no real-time phone notification. Missed reminders are placed in the local shared-bus database when Jarvis next reconciles them; this is not yet phone-side/offline delivery. Achieving reminders while the PC is off requires Eve running on the phone (or a separately hosted relay/push service), which is future work. The pairing token is currently logged for setup and stored locally in `data/eve_token.txt`; treat it as a credential and redact it from shared logs/screenshots.
+
+### Manual test sequence for Om
+
+Run low-risk tests first, then enable higher-risk categories only when ready:
+
+1. **Startup/config:** start Jarvis; confirm no TOML error, Ollama/model health succeeds, and inspect logs for optional MCP/UI/Eve failures.
+2. **Unit suite:** `uv run pytest tests/unit -q` should report 44 passing.
+3. **Conversation and tools:** ask a conversational question; test one fast-path action (e.g. volume); then test a harmless compound task and confirm tool results guide later agent steps.
+4. **Permission kill switch:** disable one category in the dashboard; verify a tool in that category is blocked; re-enable it. Confirm Jarvis cannot change these permissions through voice/tools.
+5. **Consent/HUD:** test a reversible or disposable destructive action; verify the visual card and voice prompt, then test Approve, Decline, ambiguous answer, timeout, and barge-in. Do not use valuable files.
+6. **Audit/vault:** after the logging redaction issue is fixed, use dummy credentials only; check there is no plaintext in `data/logs/*.log` or `data/logs/audit.jsonl`. Confirm DPAPI backend on Windows.
+7. **MCP:** with Node/npm available, verify the configured Playwright server starts, tools are discovered, and one harmless browser task works. Test on-demand connection for another configured server. Note first-run package download/network requirements.
+8. **Memory:** save a non-sensitive preference and ask a semantically phrased recall question; confirm episodic rows are recorded after interactions.
+9. **Computer use:** test `label_screen_elements` then click a harmless visible control; test `click_text` and verify DPI/scaling behavior.
+10. **Scheduler:** set a short normal reminder; set/cancel a recurring reminder; schedule a meeting with a 15-minute lead. Test missed reminders with a disposable reminder and controlled shutdown; confirm recurring jobs fast-forward and normal missed items are not replayed locally.
+11. **Orb/HUD/dashboard:** check transparency, placement, state changes, click-through while idle, confirmation interactivity, reminder toast, permission toggles, startup toggle, history/audit rendering, and Stop Jarvis.
+12. **Lifecycle/launcher:** test one instance only, clean self-shutdown, startup toggle, then test the Win+J launcher mode separately. Resolve any hotkey conflict with the existing trigger before enabling it in Windows Startup.
+13. **Eve:** on the trusted LAN, pair the phone; test Eve chat, phone-to-Jarvis note delivery, Jarvis-to-Eve queued event delivery/acknowledgement, and verify the experience after PC restart.
+
+For each failure, report the exact command/utterance, expected vs actual behavior, relevant log excerpt with secrets removed, and whether it is repeatable. Fix that failure before broadening the test surface.
+
+---
