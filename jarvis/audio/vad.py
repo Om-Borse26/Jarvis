@@ -118,15 +118,28 @@ class VADListener:
         max_silence      = int(self.MAX_SILENCE_MS / self.CHUNK_MS)
         min_speech       = int(self.MIN_SPEECH_MS / self.CHUNK_MS)
 
-        logger.info(f"VAD listening on device {self._device_idx} @ {self.SAMPLE_RATE}Hz")
+        target_device = self._device_idx if (self._device_idx is not None and self._device_idx >= 0) else None
+        try:
+            stream = sd.InputStream(
+                samplerate=self.SAMPLE_RATE,
+                channels=1,
+                dtype="float32",
+                blocksize=self.CHUNK_SAMPLES,
+                device=target_device,
+            )
+            logger.info(f"VAD listening on device {target_device} @ {self.SAMPLE_RATE}Hz")
+        except Exception as e:
+            logger.warning(f"Audio input device {target_device} failed ({e}), using system default microphone.")
+            stream = sd.InputStream(
+                samplerate=self.SAMPLE_RATE,
+                channels=1,
+                dtype="float32",
+                blocksize=self.CHUNK_SAMPLES,
+                device=None,
+            )
+            logger.info(f"VAD listening on default input device @ {self.SAMPLE_RATE}Hz")
 
-        with sd.InputStream(
-            samplerate=self.SAMPLE_RATE,
-            channels=1,
-            dtype="float32",
-            blocksize=self.CHUNK_SAMPLES,
-            device=self._device_idx,
-        ) as stream:
+        with stream:
             while self._running:
                 chunk, _ = stream.read(self.CHUNK_SAMPLES)
                 audio    = chunk.flatten()

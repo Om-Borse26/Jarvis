@@ -155,12 +155,24 @@ class TTSEngine:
 
         # Stream to speaker with cancellation support
         chunk_size = 2048
-        with sd.OutputStream(
-            samplerate=sample_rate,
-            channels=1,
-            dtype="float32",
-            device=self._out_device,
-        ) as stream:
+        target_device = self._out_device if (self._out_device is not None and self._out_device >= 0) else None
+        try:
+            stream = sd.OutputStream(
+                samplerate=sample_rate,
+                channels=1,
+                dtype="float32",
+                device=target_device,
+            )
+        except Exception as e:
+            logger.warning(f"Audio output device {target_device} failed ({e}), using system default speaker.")
+            stream = sd.OutputStream(
+                samplerate=sample_rate,
+                channels=1,
+                dtype="float32",
+                device=None,
+            )
+
+        with stream:
             for i in range(0, len(audio), chunk_size):
                 if self._cancel_event.is_set():
                     stream.abort()

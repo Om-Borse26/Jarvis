@@ -11,8 +11,8 @@ personality   = "calm_professional"  # calm_professional | witty | formal | casu
 
 [audio]
 # Input device — Intel Smart Sound Technology Array (4-channel WASAPI)
-input_device_index  = 9       # WASAPI mic array (auto-detected on first run)
-output_device_index = 8       # WASAPI speakers (auto-detected on first run)
+input_device_index  = -1      # -1 = System default microphone
+output_device_index = -1      # -1 = System default speakers
 sample_rate         = 16000   # Hz — optimal for Whisper
 channels            = 1       # Mono for STT
 vad_threshold       = 0.5     # Silero VAD sensitivity (0.0–1.0)

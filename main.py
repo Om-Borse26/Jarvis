@@ -8,8 +8,16 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import io
 import sys
 from pathlib import Path
+
+# Enforce UTF-8 for Windows consoles
+if sys.platform == "win32":
+    if hasattr(sys.stdout, "buffer"):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "buffer"):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 from loguru import logger
 

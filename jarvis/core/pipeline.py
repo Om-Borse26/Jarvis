@@ -50,7 +50,10 @@ class JarvisPipeline:
         self.llm     = OllamaClient()
         self.arbiter = SteerArbiter(self.tts, self.llm)
         self.vad     = VADListener(on_speech_segment=self._on_speech_segment)
-        self.trigger = TriggerSystem(on_trigger=self._on_trigger_fired)
+        self.trigger = TriggerSystem(
+            on_trigger=self._on_trigger_fired,
+            on_mode_change=self._on_wake_mode_changed,
+        )
 
         # ── State ────────────────────────────────────────────────────────
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -142,16 +145,17 @@ class JarvisPipeline:
         """Called from trigger thread when wake word or hotkey fires."""
         if self._listening:
             return   # Already listening
-        logger.debug("Trigger fired → listening mode.")
+        logger.info("🎙️ Listening armed (Hotkey Win+J). Speak now...")
         self._listening = True
-        # VAD is always running; trigger just enables the next segment to route here.
-        # In practice, the trigger arms a single-shot capture mode.
+
+    def _on_wake_mode_changed(self, enabled: bool):
+        """Spoken notification when wake word is toggled live via Win+Shift+J."""
+        msg = "Wake word listening enabled." if enabled else "Wake word disabled. Hotkey mode active."
+        if self._loop and self._loop.is_running():
+            asyncio.run_coroutine_threadsafe(self._speak_async(msg), self._loop)
 
     def _on_speech_segment(self, audio):
         """Called by VAD when a complete speech segment is ready."""
-        if not self._listening and not self.tts.is_speaking:
-            return   # Segment captured but we're not in an active session
-        # Run in the event loop from the background thread
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(
                 self._process_speech(audio),
@@ -172,14 +176,26 @@ class JarvisPipeline:
     async def _process_speech(self, audio):
         """Full pipeline: audio → STT → Mood → Arbiter → LLM → TTS."""
         try:
-            self._listening = False
-
             # ── 1. Transcribe ────────────────────────────────────────────
             text = await asyncio.to_thread(self.stt.transcribe, audio)
-            if not text.strip():
-                logger.debug("Empty transcription — skipping.")
-                self._listening = False
+            if not text or not text.strip():
                 return
+
+            was_listening = self._listening
+            self._listening = False
+
+            # Check trigger conditions: active session OR wake word recognized
+            if not was_listening:
+                if self.trigger.wake_word_enabled and self.trigger.is_wake_word(text):
+                    logger.success(f"🎙️  Wake word recognized in: '{text}'")
+                    text = self.trigger.strip_wake_word(text)
+                    if not text:
+                        await self._speak_async(f"At your service, {self._user_name}.")
+                        self._listening = True
+                        return
+                else:
+                    logger.debug(f"Ambient speech ignored: '{text}'")
+                    return
 
             logger.info(f"👤 User: {text}")
 
