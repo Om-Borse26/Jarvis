@@ -95,3 +95,24 @@ def test_gui_macros_steal_focus():
 def test_launch_only_steals_focus_when_forced_new():
     assert rules_engine.steals_focus("launch_application", {"force_new": False}) is False
     assert rules_engine.steals_focus("launch_application", {"force_new": True}) is True
+
+
+# ── Centralized rules_engine policies ────────────────────────────────────
+def test_should_reuse_window_policy():
+    assert rules_engine.should_reuse_window("brave") is True
+    assert rules_engine.should_reuse_window("brave", force_new=True) is False
+    assert rules_engine.should_reuse_window("brave in a new window") is False
+    assert rules_engine.should_reuse_window("a duplicate vs code") is False
+
+
+def test_should_reuse_tab_policy():
+    assert rules_engine.should_reuse_tab("go to reddit") is True
+    assert rules_engine.should_reuse_tab("open reddit", new_tab=True) is False
+    assert rules_engine.should_reuse_tab("open reddit in a new tab") is False
+    assert rules_engine.should_reuse_tab("open reddit", force_new=True) is False
+
+
+def test_requires_confirmation_matches_destructive():
+    assert rules_engine.requires_confirmation("delete_file", {"path": "x"}) is True
+    assert rules_engine.requires_confirmation("launch_application", {"app_name": "brave"}) is False
+

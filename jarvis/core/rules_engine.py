@@ -235,6 +235,37 @@ class RulesEngine:
         # Fallback: assume it's the process name itself
         return f"{clean}.exe" if not clean.endswith(".exe") else clean
 
+    # ── Centralized behavioral policies ──────────────────────────────────
+    # Single source of truth for the "reuse vs. new" and "resolve" decisions
+    # that tool modules used to each re-implement inline.
+    _NEW_INSTANCE_WORDS = ("new window", "another instance", "another window",
+                           "separate window", "duplicate", "fresh", "new tab")
+
+    def should_reuse_window(self, app_name: str, force_new: bool = False) -> bool:
+        """Single-instance policy: reuse an existing window unless the user
+        explicitly asked for a new/duplicate one."""
+        if force_new:
+            return False
+        q = (app_name or "").lower()
+        return not any(w in q for w in self._NEW_INSTANCE_WORDS)
+
+    def should_reuse_tab(self, request_text: str = "", force_new: bool = False,
+                         new_tab: bool = False) -> bool:
+        """Tab-reuse policy: navigate in the active tab unless a new tab/window
+        was explicitly requested."""
+        if force_new or new_tab:
+            return False
+        q = (request_text or "").lower()
+        return not any(w in q for w in ("new tab", "another tab", "new window"))
+
+    def resolve_path(self, text: str) -> Optional[str]:
+        """Natural-language path resolution (e.g. 'my downloads' → ~/Downloads)."""
+        return resolve_natural_path(text)
+
+    def requires_confirmation(self, tool_name: str, args: Dict[str, Any]) -> bool:
+        """Unified gate: a tool needs spoken confirmation if it is destructive."""
+        return self.is_destructive(tool_name, args or {})
+
     def update_context(
         self,
         tool: str,

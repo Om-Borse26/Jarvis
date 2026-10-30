@@ -395,9 +395,10 @@ class DynamicAppResolver:
     def launch(self, query: str, force_new: bool = False) -> str:
         """Find best application match, focusing existing window or launching if not running."""
         clean_q = query.lower().strip()
+        from jarvis.core.rules_engine import rules_engine
 
         # Step 1: Check if an open window already exists and reuse it!
-        if not force_new and not any(kw in clean_q for kw in ["new window", "another instance", "new tab", "duplicate"]):
+        if rules_engine.should_reuse_window(clean_q, force_new):
             win = find_app_window(clean_q)
             if win:
                 logger.info(f"🔄 '{win[1]}' already open — leaving it in the background (no focus steal).")
@@ -405,7 +406,6 @@ class DynamicAppResolver:
                 return f"{label} is already open, Sir. Say 'switch to {label}' to bring it up."
 
             # Check if process is already running in background (e.g. still initializing window)
-            from jarvis.core.rules_engine import rules_engine
             target_exe = rules_engine.resolve_process_name(clean_q)
             target_exe_lower = target_exe.lower()
 
