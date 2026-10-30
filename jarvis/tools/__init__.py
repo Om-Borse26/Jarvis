@@ -21,6 +21,8 @@ from jarvis.tools import shell_control
 from jarvis.tools import web_control
 from jarvis.tools import browser_tool
 from jarvis.tools import whatsapp_control
+from jarvis.tools import knowledge  # web Q&A (Tavily cloud answer + fact memory)
+from jarvis.tools import procedures  # named multi-step routines/recipes
 
 # ── Tier 2: Computer Use tools ───────────────────────────────────────────────
 from jarvis.tools import computer_use

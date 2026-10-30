@@ -56,6 +56,18 @@ class ToolRouter:
             result = await registry.execute(instant[command])
             return result.get("result", result.get("message"))
 
+        # ── Run a saved routine/procedure ─────────────────────────────────
+        # "run my work routine", "start my morning routine", "do my gaming setup"
+        proc_m = re.match(
+            r"^(?:can you |could you |please )?(?:run|start|do|execute|launch)\s+(?:my |the )?(.+?)(?:\s+routine|\s+procedure|\s+recipe|\s+macro|\s+setup)\s*$",
+            text,
+        )
+        if proc_m:
+            name = proc_m.group(1).strip()
+            if name:
+                res = await registry.execute("run_procedure", name=name)
+                return res.get("result", res.get("message"))
+
         # ── Audio & Volume Controls ───────────────────────────────────────
         # 1. Absolute volume: "laptop's volume to 90%", "turn volume up to 90", "volume 80"
         vol_match = re.search(r"(?:volume|sound|audio|laptop.*?volume).*?(\d{1,3})\s*(?:%|percent)?", text)
@@ -476,7 +488,34 @@ class ToolRouter:
             res = await registry.execute("list_mcp_servers")
             return res.get("result")
 
+        # ── Open-web knowledge Q&A (cloud answer, not the local model) ────
+        # Runs LAST so every PC/self/specific handler above wins first. Only
+        # fires on factual questions that are NOT about the user's own machine.
+        if self._is_web_knowledge_question(text):
+            res = await registry.execute("answer_from_web", question=utterance)
+            return res.get("result")
+
         return None
+
+    # Factual question starters that usually want an open-web answer.
+    _KNOWLEDGE_START = re.compile(
+        r"^(?:what|whats|what's|who|whose|whom|when|where|why|how|which|define|"
+        r"tell me about|give me)\b"
+    )
+    # Tokens that mean the question is about the user's own PC/context/self —
+    # those must stay local and never go to the cloud.
+    _KNOWLEDGE_EXCLUDE = re.compile(
+        r"\b(you|your|yourself|jarvis|my|mine|myself|this (?:file|code|screen|document|window)|"
+        r"screen|desktop|clipboard|volume|battery|time|date|ip|the day today)\b"
+    )
+
+    def _is_web_knowledge_question(self, text: str) -> bool:
+        if not self._KNOWLEDGE_START.match(text):
+            return False
+        if self._KNOWLEDGE_EXCLUDE.search(text):
+            return False
+        # Require a bit of substance (avoid one-word fragments).
+        return len(text.split()) >= 3
 
     def get_tool_prompt_section(self) -> str:
         """Return the formatted tool capabilities to inject into the LLM system prompt."""
