@@ -125,8 +125,11 @@ async function loadHistory(){
   const d = await getJSON("/api/history");
   const box=$("history");
   if(!d.history.length){ box.innerHTML='<div class="muted">Nothing yet.</div>'; return; }
-  box.innerHTML = d.history.map(h=>`<div class="row"><span>${h.user_input}<br>
-    <span class="muted">${(h.tools||[]).join(", ")||"no tools"} · ${h.success?"ok":"failed"}</span></span></div>`).join("");
+  box.innerHTML = d.history.map(h=>{
+    const tools = Array.isArray(h.tools) ? h.tools.join(", ") : (h.tools || "");
+    return `<div class="row"><span>${h.user_input}<br>
+    <span class="muted">${tools||"no tools"} · ${h.success?"ok":"failed"}</span></span></div>`;
+  }).join("");
 }
 
 async function loadAudit(){

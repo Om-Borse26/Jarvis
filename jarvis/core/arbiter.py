@@ -26,6 +26,23 @@ class SteerContext:
 
 from jarvis.core.memory import memory_manager
 
+# Persona styles selected by config [jarvis].personality.
+PERSONALITY_STYLES = {
+    "calm_professional": "Calm, composed and professional — precise, reassuring, minimal filler.",
+    "witty": "Witty and lightly humorous with clever quips, while staying genuinely helpful.",
+    "formal": "Formal and refined, with courteous, measured phrasing.",
+    "casual": "Relaxed, friendly and conversational — warm and easy-going.",
+}
+
+
+def _personality_guidance() -> str:
+    try:
+        from jarvis.core.config import load_config
+        p = (load_config().get("jarvis", {}).get("personality") or "calm_professional").lower()
+    except Exception:
+        p = "calm_professional"
+    return PERSONALITY_STYLES.get(p, PERSONALITY_STYLES["calm_professional"])
+
 VOICE_RULES = """CRITICAL CONVERSATIONAL VOICE INSTRUCTIONS:
 1. You speak out loud through a voice synthesizer.
 2. NEVER use markdown symbols or formatting: strictly NO asterisks (* or **), NO hashes (#), NO bullet points, NO numbered lists (NO 1., 2.), NO bold text, NO emojis.
@@ -52,6 +69,7 @@ Respond naturally:
 NORMAL_SYSTEM_PROMPT = """You are Jarvis, {user_name}'s personal, highly capable British AI assistant.
 
 Context: Time is {time}. Active application is {active_app}. User mood is {mood}. {tone_guidance}
+Persona: {personality}
 
 PERSISTENT USER PROFILE & KNOWN FACTS:
 {facts}
@@ -171,6 +189,7 @@ class SteerArbiter:
                 active_app    = active_app,
                 mood          = mood,
                 tone_guidance = tone_guidance,
+                personality   = _personality_guidance(),
                 facts         = facts_summary,
             )
             user_msg = new_user_input

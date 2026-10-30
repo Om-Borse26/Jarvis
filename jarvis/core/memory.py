@@ -163,10 +163,22 @@ def recall_user_memories(query: str = "") -> str:
             hits = []
         if hits:
             return "Here is what I remember: " + " ".join(hits)
-        q = query.lower()
-        matched = [f["fact"] for f in facts if q in f["fact"].lower() or q in f.get("category", "").lower()]
-        if matched:
-            return "Here is what I remember: " + " ".join(matched)
+        # Keyword fallback: match facts that share significant words with the query
+        # (works even when the embedding model isn't available).
+        import re as _re
+        stop = {"what", "who", "whose", "is", "are", "was", "were", "the", "a", "an",
+                "do", "does", "did", "my", "me", "i", "you", "your", "of", "to",
+                "about", "tell", "like", "likes", "have", "has", "for", "on", "in"}
+        qwords = {w for w in _re.findall(r"[a-z']+", query.lower()) if w not in stop and len(w) > 2}
+        scored = []
+        for f in facts:
+            fwords = set(_re.findall(r"[a-z']+", f["fact"].lower()))
+            overlap = len(qwords & fwords)
+            if overlap or query.lower() in f["fact"].lower():
+                scored.append((overlap, f["fact"]))
+        if scored:
+            scored.sort(key=lambda x: x[0], reverse=True)
+            return "Here is what I remember: " + " ".join(s[1] for s in scored[:4])
         return f"I could not find any memories regarding '{query}'."
 
     summary = " ".join([f["fact"] for f in facts[-6:]])

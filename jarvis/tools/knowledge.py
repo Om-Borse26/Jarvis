@@ -124,6 +124,7 @@ def answer_from_web(question: str) -> str:
     try:
         from jarvis.tools.web_control import search_web
         search_web(q)
-        return f"I couldn't get a direct answer, so I've opened a web search for '{q}', Sir."
+        return (f"I don't have a direct answer to that, Sir, but I've pulled up "
+                f"web results for '{q}' in your browser.")
     except Exception:
         return "I couldn't reach the web to answer that right now, Sir."
