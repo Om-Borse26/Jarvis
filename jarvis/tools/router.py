@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import json
+import asyncio
 import datetime
 from typing import Optional, Tuple
 from loguru import logger
@@ -226,6 +227,7 @@ class ToolRouter:
             app_target = fs_match.group(1).strip() if fs_match.group(1) else ""
             if app_target and app_target not in ("it", "this", "the window", "window", "can you"):
                 await registry.execute("focus_application", app_name=app_target)
+                await asyncio.sleep(0.35)
             await registry.execute("keyboard_hotkey", hotkey="f11")
             return f"Toggled full screen for {app_target or 'active window'}, Sir."
 
@@ -234,6 +236,7 @@ class ToolRouter:
             app_target = max_match.group(1).strip() if max_match.group(1) else ""
             if app_target and app_target not in ("it", "this", "the window", "window", "can you"):
                 await registry.execute("focus_application", app_name=app_target)
+                await asyncio.sleep(0.35)
             await registry.execute("keyboard_hotkey", hotkey="win+up")
             return f"Maximized {app_target or 'active window'}, Sir."
 

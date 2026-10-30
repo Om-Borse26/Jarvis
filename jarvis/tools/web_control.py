@@ -16,74 +16,38 @@ from jarvis.tools.registry import register_tool
 
 def navigate_or_open_browser(url: str, force_new: bool = False, new_tab: bool = False) -> bool:
     """
-    If a browser window is already open (Brave, Chrome, Edge), navigates the active tab to the URL
-    via Ctrl+L, clipboard paste, and Enter. If new_tab is True, opens a new tab in the same window (Ctrl+T).
-    Prevents spawning endless duplicate browser windows/tabs for every video or search query!
+    Open or navigate to a URL in the user's default browser (e.g. Brave) using native Windows Shell.
+    Guarantees the tab opens and the page loads without fragile simulated keystrokes.
     """
+    import os
+    import webbrowser
+    import subprocess
+
+    u = url.strip()
+    if not u.startswith(("http://", "https://")):
+        u = "https://" + u
+
     try:
-        import ctypes
-        import win32gui
-        import win32con
-        import pyautogui
-        import pyperclip
-        import time
+        os.startfile(u)
+        logger.info(f"🌐 Navigated browser to {u} via native shell")
+        return True
+    except Exception:
+        pass
 
-        pyautogui.FAILSAFE = False
+    try:
+        webbrowser.open(u, new=2 if new_tab else 0)
+        logger.info(f"🌐 Navigated browser to {u} via webbrowser")
+        return True
+    except Exception:
+        pass
 
-        user32 = ctypes.windll.user32
-        hdesk = user32.OpenInputDesktop(0, False, 0x0100 | 0x0040)
-        if hdesk:
-            user32.SetThreadDesktop(hdesk)
-
-        target_hwnd = None
-        def enum_cb(hwnd, _):
-            nonlocal target_hwnd
-            if win32gui.IsWindowVisible(hwnd):
-                title = win32gui.GetWindowText(hwnd).lower()
-                if any(b in title for b in ["brave", "chrome", "edge", "youtube", "firefox", "opera"]):
-                    target_hwnd = hwnd
-                    return False
-            return True
-
-        win32gui.EnumWindows(enum_cb, None)
-        if target_hwnd:
-            cur_fg = user32.GetForegroundWindow()
-            cur_thread = user32.GetWindowThreadProcessId(cur_fg, None)
-            my_thread = ctypes.windll.kernel32.GetCurrentThreadId()
-
-            # Windows 11 bypass foreground lock
-            user32.keybd_event(0x12, 0, 0, 0)
-            user32.keybd_event(0x12, 0, 2, 0)
-
-            try:
-                user32.AttachThreadInput(cur_thread, my_thread, True)
-                user32.ShowWindow(target_hwnd, win32con.SW_RESTORE)
-                user32.SetForegroundWindow(target_hwnd)
-                user32.AttachThreadInput(cur_thread, my_thread, False)
-            except Exception:
-                win32gui.ShowWindow(target_hwnd, win32con.SW_RESTORE)
-                win32gui.SetForegroundWindow(target_hwnd)
-
-            time.sleep(0.2)
-
-            if new_tab:
-                # Open a new tab in the same active browser window
-                pyautogui.hotkey("ctrl", "t")
-                time.sleep(0.1)
-            else:
-                # Reuse the currently active tab
-                pyautogui.hotkey("ctrl", "l")
-                time.sleep(0.08)
-
-            pyperclip.copy(url)
-            pyautogui.hotkey("ctrl", "v")
-            time.sleep(0.08)
-            pyautogui.press("enter")
-            logger.info(f"🌐 Navigated browser window to {url} (new_tab={new_tab})")
-            return True
+    try:
+        subprocess.Popen(f'start "" "{u}"', shell=True)
+        logger.info(f"🌐 Navigated browser to {u} via start command")
+        return True
     except Exception as e:
-        logger.debug(f"Browser tab reuse notice: {e}")
-    return False
+        logger.error(f"Failed to navigate to {u}: {e}")
+        return False
 
 
 def _focus_active_browser() -> bool:
@@ -95,20 +59,26 @@ def _focus_active_browser() -> bool:
         import time
 
         user32 = ctypes.windll.user32
-        hdesk = user32.OpenInputDesktop(0, False, 0x0100 | 0x0040)
+        hdesk = user32.OpenInputDesktop(0, False, 0x0100 | 0x0040 | 0x0001 | 0x0002)
         if hdesk:
             user32.SetThreadDesktop(hdesk)
 
         target = None
         def cb(hwnd, _):
             nonlocal target
-            if win32gui.IsWindowVisible(hwnd):
-                t = win32gui.GetWindowText(hwnd).lower()
-                if any(b in t for b in ["brave", "chrome", "edge", "firefox", "opera"]):
-                    target = hwnd
-                    return False
+            try:
+                if win32gui.IsWindowVisible(hwnd):
+                    t = win32gui.GetWindowText(hwnd).lower()
+                    if any(b in t for b in ["brave", "chrome", "edge", "firefox", "opera"]):
+                        target = hwnd
+                        return False
+            except Exception:
+                pass
             return True
-        win32gui.EnumWindows(cb, None)
+        try:
+            win32gui.EnumWindows(cb, None)
+        except Exception:
+            pass
         if not target:
             return False
 

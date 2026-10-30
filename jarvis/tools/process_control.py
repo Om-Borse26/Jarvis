@@ -322,15 +322,15 @@ class DynamicAppResolver:
         "whatsapp": "cmd /c start whatsapp:",
         "whats app": "cmd /c start whatsapp:",
         "spotify": "cmd /c start spotify:",
-        "calculator": "cmd /c start calc",
-        "calc": "cmd /c start calc",
+        "calculator": r"C:\Windows\System32\calc.exe",
+        "calc": r"C:\Windows\System32\calc.exe",
         "terminal": "cmd /c start wt",
-        "cmd": "cmd /c start cmd",
-        "command prompt": "cmd /c start cmd",
-        "powershell": "cmd /c start powershell",
-        "notepad": "cmd /c start notepad",
-        "explorer": "cmd /c start explorer",
-        "file explorer": "cmd /c start explorer",
+        "cmd": r"C:\Windows\System32\cmd.exe",
+        "command prompt": r"C:\Windows\System32\cmd.exe",
+        "powershell": r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+        "notepad": r"C:\Windows\System32\notepad.exe",
+        "explorer": r"C:\Windows\explorer.exe",
+        "file explorer": r"C:\Windows\explorer.exe",
         "settings": "cmd /c start ms-settings:",
         "camera": "cmd /c start microsoft.windows.camera:",
         "store": "cmd /c start ms-windows-store:",
@@ -451,11 +451,11 @@ class DynamicAppResolver:
 
         return None
 
-    def launch(self, query: str, force_new: bool = False, background: bool = True) -> str:
+    def launch(self, query: str, force_new: bool = False, background: bool = False) -> str:
         """Find best application match, focusing existing window or launching if not running.
 
-        background=True (default) keeps the user's current window in focus after a
-        fresh launch; set it False to let the new app come to the foreground.
+        background=False (default) brings the launched app to the foreground;
+        set background=True only if caller explicitly requests background mode.
         """
         clean_q = query.lower().strip()
         from jarvis.core.rules_engine import rules_engine
@@ -489,28 +489,20 @@ class DynamicAppResolver:
         prev_hwnd = _get_foreground_hwnd() if background else None
         suffix = " in the background" if background else ""
         try:
-            if source == "protocol":
-                if target.startswith("cmd /c"):
-                    subprocess.Popen(target, shell=True)
-                else:
-                    subprocess.Popen(target)
-                if background:
-                    _launch_background(prev_hwnd, clean_q)
-                return f"Opening {name.title()}{suffix}, Sir."
-            elif source == "shortcut" and target.endswith(".lnk"):
+            if target.startswith("cmd /c start "):
+                subprocess.Popen(target, shell=True)
+            elif Path(target).exists():
                 os.startfile(target)
-                if background:
-                    _launch_background(prev_hwnd, clean_q)
-                return f"Opening {name}{suffix}, Sir."
+            elif source == "protocol" and not target.endswith(".exe"):
+                subprocess.Popen(target, shell=True)
             else:
-                # Executable path
-                if Path(target).exists():
+                try:
                     os.startfile(target)
-                else:
+                except Exception:
                     subprocess.Popen(f'"{target}"', shell=True)
-                if background:
-                    _launch_background(prev_hwnd, clean_q)
-                return f"Opening {name}{suffix}, Sir."
+            if background:
+                _launch_background(prev_hwnd, clean_q)
+            return f"Opening {name.title()}{suffix}, Sir."
         except Exception as e:
             logger.error(f"Error launching {name} ({target}): {e}")
             return f"Failed to open {name}: {e}"
@@ -520,8 +512,8 @@ class DynamicAppResolver:
 app_resolver = DynamicAppResolver()
 
 
-@register_tool(name="launch_application", description="Launch an application by name WITHOUT stealing focus (stays in the background by default). Set background=False only if the user explicitly wants the app brought to the front.", category="process")
-def launch_application(app_name: str, force_new: bool = False, background: bool = True) -> str:
+@register_tool(name="launch_application", description="Launch an application by name and bring it to the front. Set background=True only if the user explicitly asks for it to stay in the background.", category="process")
+def launch_application(app_name: str, force_new: bool = False, background: bool = False) -> str:
     """Dynamically focus existing application window or launch if not running."""
     clean = app_name.lower().strip()
     return app_resolver.launch(clean, force_new=force_new, background=background)

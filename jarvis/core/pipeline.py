@@ -804,7 +804,7 @@ class JarvisPipeline:
                 py = sys.executable
                 pyw = py.replace("python.exe", "pythonw.exe")
                 exe = pyw if Path(pyw).exists() else py
-                flags = 0x08000000 if __import__("sys").platform == "win32" else 0
+                flags = 0 if Path(pyw).exists() else (0x08000000 if __import__("sys").platform == "win32" else 0)
                 self._island_proc = subprocess.Popen(
                     [exe, "-m", "jarvis.ui.island", f"--parent-pid={os.getpid()}"],
                     creationflags=flags,
@@ -818,7 +818,7 @@ class JarvisPipeline:
                 py = sys.executable
                 pyw = py.replace("python.exe", "pythonw.exe")
                 exe = pyw if Path(pyw).exists() else py
-                flags = 0x08000000 if __import__("sys").platform == "win32" else 0
+                flags = 0 if Path(pyw).exists() else (0x08000000 if __import__("sys").platform == "win32" else 0)
                 self._hud_proc = subprocess.Popen(
                     [exe, "-m", "jarvis.hud.window", f"--parent-pid={os.getpid()}"],
                     creationflags=flags,

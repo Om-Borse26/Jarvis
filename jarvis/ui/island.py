@@ -214,7 +214,7 @@ def run() -> None:
         y=_TOP_MARGIN,
         frameless=True,
         easy_drag=False,
-        on_top=False,
+        on_top=True,
         resizable=False,
         min_size=(100, 20),
         background_color="#05070d",
@@ -224,7 +224,7 @@ def run() -> None:
     def _on_loaded(*args, **kwargs):
         worker.hide_from_taskbar()
         worker.submit("mode", "collapsed")
-        worker.submit("z", "back")
+        worker.submit("z", "front")
 
     if window is not None:
         window.events.loaded += _on_loaded

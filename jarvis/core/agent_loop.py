@@ -320,12 +320,18 @@ class AgentLoop:
             # Focus-loss gate: ask once per task before an action that would
             # steal foreground focus from whatever the user is doing.
             if not self._focus_approved and rules_engine.steals_focus(tool_name, tool_args):
-                approved = await consent_manager.request(
-                    "This will switch away from your current window"
-                )
-                if not approved:
-                    logger.info(f"🛑 User declined focus change for '{tool_name}'.")
-                    return "Understood, I'll leave your current window in focus."
+                user_q = (user_request or "").lower()
+                explicit_user_action = any(k in user_q for k in [
+                    "format", "code", "type", "press", "hotkey", "shortcut", "switch", "focus",
+                    "vscode", "vs code", "brave", "chrome", "notepad", "in "
+                ])
+                if not explicit_user_action:
+                    approved = await consent_manager.request(
+                        "This will switch away from your current window"
+                    )
+                    if not approved:
+                        logger.info(f"🛑 User declined focus change for '{tool_name}'.")
+                        return "Understood, I'll leave your current window in focus."
                 self._focus_approved = True
 
             # Speak a brief progress cue for genuinely multi-step tasks.
