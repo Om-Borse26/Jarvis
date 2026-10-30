@@ -52,6 +52,12 @@
   </div>
 
   <div class="card">
+    <h2>MCP Tool Servers <span class="pill">per-server control</span></h2>
+    <div class="muted" style="margin-bottom:10px;">Toggle individual MCP servers. Disabled servers stay offline and will not start on boot.</div>
+    <div id="mcpServers"></div>
+  </div>
+
+  <div class="card">
     <h2>Reminders & Meetings</h2>
     <div id="reminders"><div class="muted">No reminders.</div></div>
   </div>
@@ -93,7 +99,7 @@ async function pollState(){
 async function loadPermissions(){
   const d = await getJSON("/api/permissions");
   const box = $("permissions"); box.innerHTML = "";
-  d.categories.forEach(cat=>{
+  (d.categories || []).forEach(cat=>{
     const on = d.policy[cat] !== false;
     const row = document.createElement("div"); row.className="row";
     row.innerHTML = `<span>${cat}</span>
@@ -104,6 +110,25 @@ async function loadPermissions(){
     });
     box.appendChild(row);
   });
+
+  const mcpBox = $("mcpServers");
+  if(mcpBox && d.mcp_servers){
+    mcpBox.innerHTML = "";
+    d.mcp_servers.forEach(srv=>{
+      const key = `mcp:${srv}`;
+      const on = d.policy[key] !== false;
+      const isLive = (d.live_servers || []).includes(srv);
+      const row = document.createElement("div"); row.className="row";
+      row.innerHTML = `<span><b>${srv}</b> ${isLive ? '<span class="pill" style="color:var(--good);border:1px solid var(--good);">online</span>' : '<span class="pill">stopped</span>'}</span>
+        <label class="switch"><input type="checkbox" ${on?"checked":""} data-srv="${srv}">
+        <span class="slider"></span></label>`;
+      row.querySelector("input").addEventListener("change", async (e)=>{
+        await postJSON("/api/permissions",{server:srv, enabled:e.target.checked});
+        setTimeout(loadPermissions, 800);
+      });
+      mcpBox.appendChild(row);
+    });
+  }
 }
 
 async function loadReminders(){

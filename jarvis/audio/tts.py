@@ -110,6 +110,7 @@ class TTSEngine:
         self._stream: Optional[sd.OutputStream] = None
         self._speaking        = False
         self._cancel_event    = threading.Event()
+        self._speech_lock     = threading.Lock()
 
         # For Steer Arbiter tracking
         self.spoken_text      = ""
@@ -135,6 +136,7 @@ class TTSEngine:
     def speak(self, text: str, sentence_chunks: bool = True):
         """
         Synthesize and play text. Blocks until playback completes or is cancelled.
+        Uses _speech_lock to serialize concurrent speech calls (e.g. reminders + responses).
 
         Args:
             text:             The full text to speak.
@@ -145,23 +147,24 @@ class TTSEngine:
         if not text:
             return
 
-        self._cancel_event.clear()
-        self._speaking        = True
-        self.spoken_text      = ""
-        self.interrupted_text = text
+        with self._speech_lock:
+            self._cancel_event.clear()
+            self._speaking        = True
+            self.spoken_text      = ""
+            self.interrupted_text = text
 
-        if self.on_speaking_start:
-            self.on_speaking_start()
+            if self.on_speaking_start:
+                self.on_speaking_start()
 
-        try:
-            if sentence_chunks:
-                self._speak_chunked(text)
-            else:
-                self._speak_full(text)
-        finally:
-            self._speaking = False
-            if self.on_speaking_stop:
-                self.on_speaking_stop()
+            try:
+                if sentence_chunks:
+                    self._speak_chunked(text)
+                else:
+                    self._speak_full(text)
+            finally:
+                self._speaking = False
+                if self.on_speaking_stop:
+                    self.on_speaking_stop()
 
     def interrupt(self):
         """

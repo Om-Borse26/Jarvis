@@ -162,13 +162,59 @@ def read_file(file_path: str, max_chars: int = 2000) -> str:
 
 
 @register_tool(
+    name="create_file",
+    description="Create a new file with optional content. If directory is omitted, 'here', or 'in it', automatically resolves to the open VS Code workspace folder or Desktop.",
+    category="filesystem"
+)
+def create_file(filename: str, content: str = "", directory: str = "") -> str:
+    """Create a new file, resolving 'here' or 'in it' to the active VS Code workspace or Desktop."""
+    clean_name = filename.strip('"').strip("'").strip()
+    if not clean_name:
+        return "Please specify a filename, Sir."
+
+    p_name = Path(clean_name)
+    target_dir: Optional[Path] = None
+
+    clean_dir = directory.strip('"').strip("'").strip().lower()
+    if clean_dir in ("", "here", "in it", "current", "this folder", "workspace", "vscode"):
+        ws = get_active_vscode_workspace()
+        if ws and ws.exists():
+            target_dir = ws
+        else:
+            target_dir = Path.cwd()
+    elif directory:
+        target_dir = Path(directory.strip('"').strip("'"))
+
+    if p_name.is_absolute():
+        final_path = p_name
+    elif target_dir:
+        final_path = target_dir / p_name
+    else:
+        final_path = Path.cwd() / p_name
+
+    try:
+        final_path.parent.mkdir(parents=True, exist_ok=True)
+        final_path.write_text(content, encoding="utf-8")
+        loc_desc = f"in active workspace '{final_path.parent.name}'" if target_dir and target_dir.name == final_path.parent.name else f"at {final_path.resolve()}"
+        return f"Created file '{final_path.name}' {loc_desc}, Sir."
+    except Exception as e:
+        logger.error(f"Failed to create file: {e}")
+        return f"Failed to create file '{clean_name}': {e}"
+
+
+@register_tool(
     name="write_file",
     description="Write or append text content to a file on disk.",
     category="filesystem"
 )
 def write_file(file_path: str, content: str, mode: str = "w") -> str:
     """Write or append text content to a file."""
-    p = Path(file_path.strip('"').strip("'"))
+    clean_p = file_path.strip('"').strip("'")
+    p = Path(clean_p)
+    if not p.is_absolute():
+        ws = get_active_vscode_workspace()
+        if ws and ws.exists():
+            p = ws / clean_p
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         write_mode = "a" if mode.lower() in ("append", "a") else "w"

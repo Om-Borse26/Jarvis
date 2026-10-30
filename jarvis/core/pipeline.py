@@ -36,6 +36,7 @@ from jarvis.core.arbiter  import SteerArbiter
 from jarvis.core.config   import load_config
 from jarvis.core.clarify  import missing_slot_question
 from jarvis.core.intent_scope import select_tools
+from jarvis.core.intent_dispatcher import intent_dispatcher
 from jarvis.core.memory   import memory_manager
 from jarvis.tools.screen_tool import ScreenTool
 from jarvis.audio.speaker_id import speaker_id
@@ -106,6 +107,11 @@ class JarvisPipeline:
         # Active application context (updated by system monitor)
         self._active_app = "Desktop"
 
+        # Reminder queueing and barge-in continuation state
+        self._is_processing_turn   = False
+        self._pending_reminders: list[str] = []
+        self._interrupted_summary  = ""
+
         # ── Wire HUD callbacks (set externally when HUD is ready) ────────
         self.tts.on_speaking_start = None
         self.tts.on_speaking_stop  = None
@@ -124,7 +130,7 @@ class JarvisPipeline:
 
         # ── Proactivity scheduler (reminders / recurring tasks) ─────────
         self.scheduler = scheduler
-        self.scheduler.speak_fn   = self._speak_async
+        self.scheduler.speak_fn   = self._on_scheduler_speak
         self.scheduler.command_fn = self._run_scheduled_command
         self.scheduler.notify_fn  = lambda title, body="": self.hud.notify(title, body)
 
@@ -255,6 +261,9 @@ class JarvisPipeline:
         """Called from trigger thread when wake word or hotkey fires."""
         if self.tts.is_speaking:
             logger.info("🛑 Hotkey pressed during speech — interrupting playback.")
+            interrupted = self.tts.interrupted_text or self.tts.spoken_text
+            if interrupted and not self._interrupted_summary:
+                self._interrupted_summary = interrupted.strip()
             self.tts.interrupt()
             # Don't cancel a task that's waiting on the user's confirmation.
             if not self.consent.is_pending():
@@ -285,6 +294,11 @@ class JarvisPipeline:
 
     def _on_barge_in(self):
         """Called when user explicitly interrupts."""
+        if self.tts.is_speaking:
+            interrupted = self.tts.interrupted_text or self.tts.spoken_text
+            if interrupted and not self._interrupted_summary:
+                self._interrupted_summary = interrupted.strip()
+            self.tts.interrupt()
         self.arbiter.on_barge_in()
         # While a confirmation is pending, let the user's answer resolve it
         # instead of cancelling the task that's awaiting consent.
@@ -294,6 +308,14 @@ class JarvisPipeline:
         self._listening = True
         self._listening_timestamp = time.time()
         state_bridge.set("listening")
+
+    async def _on_scheduler_speak(self, text: str):
+        """Speak a scheduler reminder or queue it if audio is in use or a turn is actively processing."""
+        if self._listening or self._is_processing_turn or self.tts.is_speaking:
+            logger.info(f"⏰ Audio in use or turn in progress — queuing reminder: {text}")
+            self._pending_reminders.append(text)
+        else:
+            await self._speak_async(text)
 
     async def _handle_screen_request(self) -> str:
         """Capture desktop screen and extract real active window, process, and OCR content."""
@@ -384,6 +406,7 @@ class JarvisPipeline:
 
             # Consume the active armed token for this command
             self._listening = False
+            self._is_processing_turn = True
             logger.info(f"👤 User: {text}")
 
             # ── Speaker Verification & Voice Enrollment ───────────────────
@@ -452,6 +475,7 @@ class JarvisPipeline:
             fast_resp = await self.tool_router.try_fast_path(text)
             if fast_resp:
                 logger.info(f"⚡ Fast-path action executed: {fast_resp}")
+                fast_resp = self._weave_announcements(fast_resp)
                 await self._speak_async(fast_resp)
                 self._listening = True
                 self._listening_timestamp = time.time()
@@ -521,50 +545,16 @@ class JarvisPipeline:
                 "an unspecified essay. 'Your dashboard' means the Jarvis dashboard."
             )
 
-            # ── 4. Single tool-aware decision (native function calling) ──
-            # One LLM call decides: speak conversationally OR invoke a tool.
-            # If a tool is chosen, the agent loop continues the ReAct cycle,
-            # seeded with this first decision (no redundant second LLM call).
-            self._cancel_llm.clear()
-            messages = [{"role": "system", "content": system_prompt}]
-            history = self._conversation_history[-self._max_history:]
-            if history:
-                messages.extend(history)
-            messages.append({"role": "user", "content": user_msg})
+            # ── 4. Semantic Intent Dispatcher (Tiered Hierarchy & Anti-Hallucination) ──
+            intent_res = await intent_dispatcher.dispatch(text, active_app=self._active_app)
+            logger.info(f"🎯 Intent Dispatcher: type={intent_res.intent_type}, source={intent_res.source}")
 
-            # Small talk / plain questions get no tools; commands get a scoped
-            # toolset (external MCP tools only when explicitly in scope).
-            tools, scoped = select_tools(text)
-            logger.debug(f"🎯 Tool scope: {scoped or ('none' if not tools else 'core')} ({len(tools)} tools)")
-
-            # Privacy-aware routing: non-private, no-tool turns may go to the cloud
-            # model (fast, better chat) with a MINIMAL prompt that carries no private
-            # context. Everything else stays local.
-            use_cloud = self.cloud_llm is not None and allow_cloud(text, bool(tools))
-            if use_cloud and self.cloud_llm is not None:
-                logger.info("☁️ Cloud model for this non-private turn.")
-                client = self.cloud_llm
-                cloud_messages = [{"role": "system", "content": CLOUD_CHAT_PROMPT},
-                                  {"role": "user", "content": text}]
-                decision = await client.chat_with_tools(
-                    messages     = cloud_messages,
-                    tools        = [],
-                    cancel_event = self._cancel_llm,
-                    temperature  = mood_state.temperature,
-                )
-            else:
-                decision = await self.llm.chat_with_tools(
-                    messages     = messages,
-                    tools        = tools,
-                    cancel_event = self._cancel_llm,
-                    temperature  = mood_state.temperature,
-                )
             final_response = ""
             if self._cancel_llm.is_set():
                 final_response = ""
-            elif decision["tool_calls"] and tools:
-                # ── Action / multi-step path via the agent loop ──────────
-                logger.info(f"🤖 Tool workflow via AgentLoop for: '{text}'")
+            elif intent_res.intent_type == "tool_call" and intent_res.tool_calls:
+                # Direct tool calls (handles single and decomposed multi-intent)
+                logger.info(f"🤖 Tool workflow via AgentLoop for: '{text}' ({len(intent_res.tool_calls)} calls)")
                 final_response = await self.agent_loop.run(
                     user_request         = user_msg,
                     user_name            = self._user_name,
@@ -573,25 +563,78 @@ class JarvisPipeline:
                     mood                 = mood_state.mood,
                     conversation_history = self._conversation_history,
                     system_prompt        = system_prompt,
-                    seed_tool_calls      = decision["tool_calls"],
-                    tools                = tools,
+                    seed_tool_calls      = intent_res.tool_calls,
+                    tools                = registry.get_tools_schema(),
                 )
-                if final_response and not self._cancel_llm.is_set():
-                    logger.info(f"🤖 Jarvis: {final_response}")
-                    await asyncio.to_thread(self.tts.speak, final_response, False)
+            elif intent_res.intent_type == "unsupported":
+                # Honest communication — no faking or hallucinating success!
+                final_response = intent_res.unsupported_reason
+            elif intent_res.intent_type == "conversational" and intent_res.conversational_response:
+                # Direct conversational response
+                final_response = intent_res.conversational_response
             else:
-                # ── Conversational path — speak the response ─────────────
-                final_response = re.sub(r"[*#_`~]", "", decision["content"] or "").strip()
-                if not final_response:
-                    final_response = "Sorry, I didn't quite get that, Sir."
-                if final_response and not self._cancel_llm.is_set():
-                    for sentence in re.split(r"(?<=[.!?])\s+", final_response):
-                        if self._cancel_llm.is_set():
-                            break
-                        sentence = sentence.strip()
-                        if sentence:
-                            logger.debug(f"🤖 Jarvis: {sentence}")
-                            await asyncio.to_thread(self.tts.speak, sentence, False)
+                # Fallback to standard chat_with_tools / AgentLoop path
+                self._cancel_llm.clear()
+                messages = [{"role": "system", "content": system_prompt}]
+                history = self._conversation_history[-self._max_history:]
+                if history:
+                    messages.extend(history)
+                messages.append({"role": "user", "content": user_msg})
+
+                tools, scoped = select_tools(text)
+                logger.debug(f"🎯 Tool scope fallback: {scoped or ('none' if not tools else 'core')} ({len(tools)} tools)")
+
+                use_cloud = self.cloud_llm is not None and allow_cloud(text, bool(tools))
+                if use_cloud and self.cloud_llm is not None:
+                    logger.info("☁️ Cloud model for this non-private turn.")
+                    client = self.cloud_llm
+                    cloud_messages = [{"role": "system", "content": CLOUD_CHAT_PROMPT},
+                                      {"role": "user", "content": text}]
+                    decision = await client.chat_with_tools(
+                        messages     = cloud_messages,
+                        tools        = [],
+                        cancel_event = self._cancel_llm,
+                        temperature  = mood_state.temperature,
+                    )
+                else:
+                    decision = await self.llm.chat_with_tools(
+                        messages     = messages,
+                        tools        = tools,
+                        cancel_event = self._cancel_llm,
+                        temperature  = mood_state.temperature,
+                    )
+
+                if self._cancel_llm.is_set():
+                    final_response = ""
+                elif decision["tool_calls"] and tools:
+                    logger.info(f"🤖 Tool workflow via AgentLoop for: '{text}'")
+                    final_response = await self.agent_loop.run(
+                        user_request         = user_msg,
+                        user_name            = self._user_name,
+                        current_time         = datetime.datetime.now().strftime("%H:%M"),
+                        active_app           = self._active_app,
+                        mood                 = mood_state.mood,
+                        conversation_history = self._conversation_history,
+                        system_prompt        = system_prompt,
+                        seed_tool_calls      = decision["tool_calls"],
+                        tools                = tools,
+                    )
+                else:
+                    final_response = re.sub(r"[*#_`~]", "", decision["content"] or "").strip()
+                    if not final_response:
+                        final_response = "Sorry, I didn't quite get that, Sir."
+
+            # Stitch any pending reminders or leftover context from interrupted turns
+            final_response = self._weave_announcements(final_response)
+
+            if final_response and not self._cancel_llm.is_set():
+                logger.info(f"🤖 Jarvis: {final_response}")
+                for sentence in re.split(r"(?<=[.!?])\s+", final_response):
+                    if self._cancel_llm.is_set():
+                        break
+                    sentence = sentence.strip()
+                    if sentence:
+                        await asyncio.to_thread(self.tts.speak, sentence, False)
 
             # Keep listening open for 15 seconds for seamless conversational follow-ups
             self._listening = True
@@ -622,10 +665,31 @@ class JarvisPipeline:
         except Exception as e:
             logger.exception(f"Pipeline error: {e}")
             await self._speak_async("I encountered an error. Please try again.")
+        finally:
+            self._is_processing_turn = False
 
     # ──────────────────────────────────────────────────────────────────
     # Helpers
     # ──────────────────────────────────────────────────────────────────
+
+    def _weave_announcements(self, response: str) -> str:
+        """Weave pending background reminders or interrupted previous points into the spoken response."""
+        prefix_parts = []
+        if self._pending_reminders:
+            reminders_str = "; ".join(self._pending_reminders)
+            self._pending_reminders.clear()
+            prefix_parts.append(f"A scheduled reminder: {reminders_str}")
+        if self._interrupted_summary:
+            leftover = self._interrupted_summary
+            self._interrupted_summary = ""
+            brief = leftover.split(".")[0].strip()
+            if brief and len(brief) > 5:
+                prefix_parts.append(f"Regarding what you asked earlier about {brief}")
+
+        if prefix_parts and response:
+            prefix = ". ".join(prefix_parts) + ". "
+            return f"{prefix}{response}"
+        return response
 
     async def _speak_async(self, text: str):
         """Speak text asynchronously without blocking the event loop."""

@@ -201,8 +201,17 @@ class MCPManager:
             return {}
 
     async def start_all(self, only: Optional[list] = None, per_server_timeout: float = 60) -> None:
+        from jarvis.core.permissions import permission_policy
         servers = self._load_servers()
-        enabled = {n: c for n, c in servers.items() if not c.get("disabled")}
+        enabled = {}
+        for n, c in servers.items():
+            if c.get("disabled"):
+                continue
+            if not permission_policy.is_allowed(f"mcp:{n}"):
+                logger.info(f"[MCP] '{n}' is disabled by user policy in permissions.json (skipping start).")
+                continue
+            enabled[n] = c
+
         if only is not None:
             enabled = {n: c for n, c in enabled.items() if n in only}
         if not enabled:
@@ -262,6 +271,35 @@ class MCPManager:
                 required=pname in required,
             ))
         return params
+
+    async def stop_server(self, name: str) -> bool:
+        """Stop an individual MCP server and unregister its tools."""
+        if name not in self._clients:
+            return False
+        client = self._clients.pop(name)
+        try:
+            await client.stop()
+        except Exception:
+            pass
+        to_del = [tname for tname, tdef in list(registry._tools.items()) if tdef.category == f"mcp:{name}"]
+        for tname in to_del:
+            registry._tools.pop(tname, None)
+        logger.info(f"[MCP] Stopped '{name}' and unregistered {len(to_del)} tools.")
+        return True
+
+    async def toggle_server(self, name: str, enabled: bool) -> bool:
+        """Dynamically enable or disable an MCP server, updating persistence."""
+        from jarvis.core.permissions import permission_policy
+        permission_policy.set(f"mcp:{name}", enabled)
+        if enabled:
+            servers = self._load_servers()
+            if name in servers:
+                await self.start_server(name, servers[name])
+                return True
+            return False
+        else:
+            await self.stop_server(name)
+            return True
 
     def live_tools(self) -> Dict[str, List[str]]:
         return {name: [t.get("name", "") for t in c.tools] for name, c in self._clients.items()}

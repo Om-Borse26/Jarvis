@@ -66,13 +66,17 @@ class PermissionPolicy:
 
     def is_allowed(self, category: str) -> bool:
         """Default-allow unknown categories; respect explicit user toggles."""
-        return self._policy.get(self._base(category), True)
+        clean = (category or "general").strip().lower()
+        if clean in self._policy:
+            return self._policy[clean]
+        return self._policy.get(self._base(clean), True)
 
     # ── User-only mutators (called by the dashboard/API, NOT by any tool) ─────
     def set(self, category: str, enabled: bool) -> None:
-        self._policy[self._base(category)] = bool(enabled)
+        clean = (category or "general").strip().lower()
+        self._policy[clean] = bool(enabled)
         self.save()
-        logger.info(f"[Permissions] '{category}' set to {'enabled' if enabled else 'disabled'} by user.")
+        logger.info(f"[Permissions] '{clean}' set to {'enabled' if enabled else 'disabled'} by user.")
 
     def as_dict(self) -> Dict[str, bool]:
         return dict(self._policy)

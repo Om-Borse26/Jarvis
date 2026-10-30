@@ -115,7 +115,14 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json(ui_directive.snapshot())
         if r == "/api/permissions":
             from jarvis.core.permissions import permission_policy, KNOWN_CATEGORIES
-            return self._json({"categories": KNOWN_CATEGORIES, "policy": permission_policy.as_dict()})
+            from jarvis.tools.mcp_runtime import mcp_manager
+            servers = list(mcp_manager._load_servers().keys())
+            return self._json({
+                "categories": KNOWN_CATEGORIES,
+                "mcp_servers": servers,
+                "live_servers": list(mcp_manager._clients.keys()),
+                "policy": permission_policy.as_dict(),
+            })
         if r == "/api/reminders":
             from jarvis.core.scheduler import scheduler
             return self._json({"reminders": scheduler.list_jobs()})
@@ -145,8 +152,16 @@ class _Handler(BaseHTTPRequestHandler):
         if r == "/api/permissions":
             from jarvis.core.permissions import permission_policy
             cat = body.get("category", "")
+            server = body.get("server", "")
             enabled = bool(body.get("enabled", True))
-            if cat:
+            if server:
+                from jarvis.tools.mcp_runtime import mcp_manager
+                import asyncio
+                try:
+                    asyncio.run(mcp_manager.toggle_server(server, enabled))
+                except Exception as e:
+                    logger.warning(f"Error toggling MCP {server}: {e}")
+            elif cat:
                 permission_policy.set(cat, enabled)
             return self._json({"ok": True, "policy": permission_policy.as_dict()})
         if r == "/api/reminders/cancel":

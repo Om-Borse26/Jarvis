@@ -88,7 +88,7 @@ vault_path      = "data/vault.db"
 # MCP servers to launch automatically at startup (by name from mcp_servers.json).
 # Leave empty [] to start none at boot and connect on demand via voice
 # ("connect the playwright server"). Others can be marked "disabled": true there.
-autostart_servers = ["playwright"]
+autostart_servers = ["playwright", "tavily", "context7", "codebase-memory", "memory", "stitch"]
 registry_db_path    = "config/tools_registry.json"
 auto_search_online  = true    # Search GitHub/MCP registry for new tools
 auto_generate       = true    # Generate MCPs using qwen2.5-coder if not found

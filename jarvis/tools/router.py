@@ -34,6 +34,16 @@ class ToolRouter:
         """
         norm_text = SpeechNormalizer.normalize(utterance)
         text = re.sub(r"\s+", " ", norm_text.lower().strip().rstrip(".!?"))
+        # Compound / multi-step requests flow to the intent dispatcher & agent loop
+        # (exception: compound youtube search phrases like "open youtube and search...")
+        if re.search(r"\b(?:and|then|after that)\b", text) and not re.search(r"\b(?:open|search)\s+youtube\s+and\b", text):
+            return None
+
+        return await self._try_single_fast_path(utterance)
+
+    async def _try_single_fast_path(self, utterance: str) -> Optional[str]:
+        norm_text = SpeechNormalizer.normalize(utterance)
+        text = re.sub(r"\s+", " ", norm_text.lower().strip().rstrip(".!?"))
         clean_cmd = re.sub(r"\s+", " ", SpeechNormalizer.clean_command(text).lower())
 
         if re.match(r"^(?:did|have|has|was|were)\s", text):
@@ -48,6 +58,9 @@ class ToolRouter:
             return None
         instant = {
             "open dashboard": "open_dashboard", "open the dashboard": "open_dashboard",
+            "open your dashboard": "open_dashboard", "show your dashboard": "open_dashboard",
+            "open jarvis dashboard": "open_dashboard", "jarvis dashboard": "open_dashboard",
+            "jarvis's dashboard": "open_dashboard",
             "bring up the dashboard": "open_dashboard", "bring up your dashboard": "open_dashboard",
             "turn yourself off": "stop_jarvis", "shut yourself down": "stop_jarvis",
             "list mcp servers": "list_mcp_servers", "list the mcp servers": "list_mcp_servers",
@@ -136,7 +149,7 @@ class ToolRouter:
             return res.get("result")
 
         # ── Screen Brightness ─────────────────────────────────────────────
-        bright_set = re.search(r"(?:set\s+)?(?:the\s+)?brightness\s+(?:to\s+)?(\d{1,3})\s*(?:%|percent)?", text)
+        bright_set = re.search(r"(?:set|turn|put|bring|change|reduce)?\s*(?:down|up)?\s*(?:the\s+)?(?:screen\s+)?brightness\s+(?:to\s+)?(\d{1,3})\s*(?:%|percent)?", text)
         if not bright_set:
             bright_set = re.search(r"(?:brightness|screen)\s+(?:to\s+)?(\d{1,3})\s*(?:%|percent)", text)
         if bright_set:
@@ -490,7 +503,7 @@ class ToolRouter:
                 "video", "videos", "channel", "first", "second", "third", "fourth", "1st", "2nd", "3rd",
                 "most watched", "most popular", "whatsapp", "what-up", "chat", "message", "group",
                 "website", "url", "file", "folder", "directory", "youtube", "google", "mail", "email",
-                "screen", "screenshot", "mcp", "mcb", "stitch"
+                "screen", "screenshot", "mcp", "mcb", "stitch", "dashboard"
             ]
             if not any(dk in app_target for dk in DISALLOWED_KEYWORDS):
                 res = await registry.execute("launch_application", app_name=app_target)
@@ -544,6 +557,21 @@ class ToolRouter:
         if remember_match:
             name_val = remember_match.group(1).title()
             res = await registry.execute("save_user_memory", fact=f"User's name is {name_val}")
+            return res.get("result")
+
+        # "My favorite color is red. Keep that in memory", "Save that in memory", etc.
+        keep_mem_match = re.search(r"(.+?)[,\.\s]+(?:keep|save|put)\s+(?:that\s+)?in\s+memory", text)
+        if keep_mem_match:
+            fact_val = keep_mem_match.group(1).strip()
+            if fact_val:
+                res = await registry.execute("save_user_memory", fact=fact_val)
+                return res.get("result", f"I've committed that to memory: {fact_val}, Sir.")
+
+        # "What is my favorite color?", "What's my favorite food?"
+        fav_q_match = re.search(r"\bwhat(?:'s|\s+is)\s+my\s+favorite\s+([a-zA-Z0-9_\-\s]+)\b", text)
+        if fav_q_match:
+            item = fav_q_match.group(1).strip()
+            res = await registry.execute("recall_user_memories", query=f"favorite {item}")
             return res.get("result")
 
         if text.startswith("remember that ") or text.startswith("remember "):
