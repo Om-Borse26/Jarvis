@@ -121,8 +121,9 @@ def ocr_screen() -> str:
         # Fallback to pytesseract
         try:
             import pytesseract  # type: ignore
-            text = pytesseract.image_to_string(img)
-            lines = [line.strip() for line in text.split("\n") if line.strip()]
+            raw_text = pytesseract.image_to_string(img)
+            text_str = raw_text if isinstance(raw_text, str) else str(raw_text or "")
+            lines = [line.strip() for line in text_str.split("\n") if line.strip()]
             return f"Screen text ({len(lines)} lines):\n" + "\n".join(lines[:50])
         except ImportError:
             pass

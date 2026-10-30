@@ -178,7 +178,7 @@ def change_brightness_relative(delta_percent: int = 10) -> str:
         cur = res.stdout.strip().splitlines()[0].strip() if res.stdout.strip() else ""
         if not cur.isdigit():
             return "I couldn't read the current brightness on this display."
-        new_level = max(0, min(100, int(cur) + int(delta_percent)))
+        new_level = max(0, min(100, int(cur) + delta_percent))
         subprocess.run(
             ["powershell", "-NoProfile", "-Command",
              f"(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1,{new_level})"],

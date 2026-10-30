@@ -285,7 +285,7 @@ def browser_scroll(direction: str = "down", amount: int = 4) -> str:
         if not _focus_active_browser():
             return "I couldn't find an open browser window, Sir."
         time.sleep(0.1)
-        step = 400 * max(1, int(amount))
+        step = 400 * max(1, amount)
         pyautogui.scroll(step if direction.lower().startswith("up") else -step)
         return f"Scrolled {direction.lower()}, Sir."
     except Exception as e:

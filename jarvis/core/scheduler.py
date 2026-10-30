@@ -287,7 +287,7 @@ class Scheduler:
         con.commit()
         jid = cur.lastrowid
         con.close()
-        return int(jid or 0)
+        return jid or 0
 
     def list_jobs(self) -> List[Dict[str, Any]]:
         con = sqlite3.connect(self.db_path)
@@ -356,7 +356,7 @@ def schedule_meeting(title: str, when: str, lead_minutes: int = 15) -> str:
     if not parsed:
         return f"I couldn't understand the meeting time '{when}'. Try 'at 3pm' or 'tomorrow at 10am'."
     event_at = parsed["fire_at"]
-    lead = max(1, int(lead_minutes)) * 60
+    lead = max(1, lead_minutes) * 60
     fire_at = event_at - lead
     if fire_at <= time.time():
         fire_at = time.time() + 30  # meeting is imminent — remind right away

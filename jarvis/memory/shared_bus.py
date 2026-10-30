@@ -70,7 +70,7 @@ class SharedBus:
         eid = cur.lastrowid
         con.close()
         logger.info(f"[SharedBus] Queued '{type_}' for {target} (#{eid}).")
-        return int(eid or 0)
+        return eid or 0
 
     def pending(self, target: str, limit: int = 20) -> List[Dict[str, Any]]:
         con = sqlite3.connect(self.db_path)
