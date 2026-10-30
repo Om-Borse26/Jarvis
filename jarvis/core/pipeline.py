@@ -541,7 +541,7 @@ class JarvisPipeline:
             # model (fast, better chat) with a MINIMAL prompt that carries no private
             # context. Everything else stays local.
             use_cloud = self.cloud_llm is not None and allow_cloud(text, bool(tools))
-            if use_cloud:
+            if use_cloud and self.cloud_llm is not None:
                 logger.info("☁️ Cloud model for this non-private turn.")
                 client = self.cloud_llm
                 cloud_messages = [{"role": "system", "content": CLOUD_CHAT_PROMPT},

@@ -226,7 +226,8 @@ def run() -> None:
         worker.submit("mode", "collapsed")
         worker.submit("z", "back")
 
-    window.events.loaded += _on_loaded
+    if window is not None:
+        window.events.loaded += _on_loaded
     webview.start(gui="edgechromium" if sys.platform == "win32" else None)
 
 

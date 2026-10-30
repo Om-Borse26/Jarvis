@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import subprocess
 import urllib.parse
+from typing import Any
 from loguru import logger
 from jarvis.tools.registry import register_tool
 
@@ -397,6 +398,7 @@ def click_active_video(index: int = 1) -> str:
                 title = win32gui.GetWindowText(hwnd).lower()
                 if any(k in title for k in ["youtube", "chrome", "brave", "edge"]):
                     target_hwnd = hwnd
+            return True
         try:
             win32gui.EnumWindows(enum_cb, None)
             if target_hwnd:
@@ -437,12 +439,13 @@ def play_youtube_video(query: str) -> str:
     """Search YouTube for a specific video and play it directly in browser."""
     clean_q = query.strip().strip("'").strip('"')
     try:
-        import yt_dlp
-        ydl_opts = {"quiet": True, "extract_flat": True, "skip_download": True}
+        import yt_dlp  # type: ignore
+        ydl_opts: Any = {"quiet": True, "extract_flat": True, "skip_download": True}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            res = ydl.extract_info(f"ytsearch1:{clean_q}", download=False)
-            if res and "entries" in res and res["entries"]:
-                entry = res["entries"][0]
+            res: Any = ydl.extract_info(f"ytsearch1:{clean_q}", download=False)
+            entries = list((res or {}).get("entries") or [])
+            if entries:
+                entry: Any = entries[0]
                 title = entry.get("title", clean_q)
                 url = entry.get("url")
                 if not url or not url.startswith("http"):

@@ -64,8 +64,9 @@ class ToolRouter:
         clean_no_punct = re.sub(r"[^\w\s]", "", clean_cmd).strip()
         if command in instant or clean_cmd in instant or clean_no_punct in instant:
             target_tool = instant.get(command) or instant.get(clean_cmd) or instant.get(clean_no_punct)
-            result = await registry.execute(target_tool)
-            return result.get("result", result.get("message"))
+            if target_tool:
+                result = await registry.execute(target_tool)
+                return result.get("result", result.get("message"))
 
         # ── Reminders & Timers Fast Path ───────────────────────────────────
         rem_m = re.match(

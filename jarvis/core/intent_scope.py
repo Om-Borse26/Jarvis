@@ -81,7 +81,7 @@ _GROUPS: dict[str, tuple[list[str], list[str]]] = {
 
 def _kw_pattern(keywords: List[str]) -> "re.Pattern[str]":
     # Whole-word match (plural allowed) so "play" doesn't fire inside "playwright".
-    def alt(ks):
+    def alt(ks: list[str]) -> str:
         return "|".join(re.escape(k) for k in sorted(ks, key=len, reverse=True))
     words = [k for k in keywords if k[:1].isalnum()]
     suffixes = [k for k in keywords if not k[:1].isalnum()]  # e.g. ".com"

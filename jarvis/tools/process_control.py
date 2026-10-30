@@ -117,8 +117,9 @@ def focus_existing_window(app_query: str) -> Optional[str]:
                     target_hwnd, matched_title = matched_hwnds[0]
             else:
                 target_hwnd, matched_title = matched_hwnds[0]
-
-            return _bring_to_front(target_hwnd) and matched_title
+            if _bring_to_front(target_hwnd):
+                return matched_title
+            return None
     except Exception as e:
         logger.debug(f"Window focus notice: {e}")
     return None
