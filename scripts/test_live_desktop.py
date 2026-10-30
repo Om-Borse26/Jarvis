@@ -13,6 +13,14 @@ import json
 import urllib.request
 import urllib.error
 
+try:
+    if sys.stdout.encoding != "utf-8":
+        sys.stdout.reconfigure(encoding="utf-8")
+    if sys.stderr.encoding != "utf-8":
+        sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 ENDPOINT = "http://127.0.0.1:8787/api/chat"
 
 LIVE_TEST_COMMANDS = [
@@ -39,8 +47,8 @@ def check_jarvis_online() -> bool:
 
 def send_query(name: str, query: str) -> None:
     print(f"\n" + "=" * 60)
-    print(f"▶ TEST: {name}")
-    print(f"👤 Spoken Query: '{query}'")
+    print(f">> TEST: {name}")
+    print(f">> [User]: '{query}'")
     print("=" * 60)
     data = json.dumps({"text": query}).encode("utf-8")
     req = urllib.request.Request(
@@ -54,11 +62,11 @@ def send_query(name: str, query: str) -> None:
             data = json.loads(resp.read().decode("utf-8"))
             dur = time.time() - t0
             if data.get("ok"):
-                print(f"🤖 Jarvis ({dur:.2f}s): {data.get('response', '')}")
+                print(f">> [Jarvis] ({dur:.2f}s): {data.get('response', '')}")
             else:
-                print(f"❌ Jarvis Error: {data.get('error', '')}")
+                print(f"[FAIL] Jarvis Error: {data.get('error', '')}")
     except Exception as e:
-        print(f"❌ Failed to reach Jarvis: {e}")
+        print(f"[FAIL] Failed to reach Jarvis: {e}")
 
 def main():
     print("=" * 70)
@@ -71,16 +79,16 @@ def main():
         print("Please run 'python main.py' in a separate terminal first!")
         sys.exit(1)
 
-    print("✅ Jarvis is online and ready! Starting live desktop demonstration...\n")
+    print("[OK] Jarvis is online and ready! Starting live desktop demonstration...\n")
     time.sleep(1)
 
     for name, query in LIVE_TEST_COMMANDS:
         send_query(name, query)
-        print("⏳ Waiting 4 seconds for desktop actions & TTS to complete...")
+        print("... Waiting 4 seconds for desktop actions & TTS to complete...")
         time.sleep(4)
 
     print("\n" + "=" * 70)
-    print("  🎉 ALL LIVE DESKTOP TESTS COMPLETED SUCCESSFULLY!")
+    print("  ALL LIVE DESKTOP TESTS COMPLETED SUCCESSFULLY!")
     print("=" * 70)
 
 if __name__ == "__main__":

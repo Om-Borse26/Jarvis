@@ -12,10 +12,18 @@ import json
 import urllib.request
 import urllib.error
 
+try:
+    if sys.stdout.encoding != "utf-8":
+        sys.stdout.reconfigure(encoding="utf-8")
+    if sys.stderr.encoding != "utf-8":
+        sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 ENDPOINT = "http://127.0.0.1:8787/api/chat"
 
 def send(query: str) -> None:
-    print(f"\n👤 You: {query}")
+    print(f"\n[You]: {query}")
     data = json.dumps({"text": query}).encode("utf-8")
     req = urllib.request.Request(
         ENDPOINT,
@@ -26,13 +34,13 @@ def send(query: str) -> None:
         with urllib.request.urlopen(req, timeout=120) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             if data.get("ok"):
-                print(f"🤖 Jarvis: {data.get('response', '')}\n")
+                print(f"[Jarvis]: {data.get('response', '')}\n")
             else:
-                print(f"❌ Jarvis Error: {data.get('error', 'Unknown error')}\n")
+                print(f"[FAIL] Jarvis Error: {data.get('error', 'Unknown error')}\n")
     except urllib.error.URLError as e:
-        print(f"❌ Connection error ({ENDPOINT}): Is Jarvis running via 'python main.py'? ({e})")
+        print(f"[FAIL] Connection error ({ENDPOINT}): Is Jarvis running via 'python main.py'? ({e})")
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"[FAIL] Error: {e}")
 
 def main():
     if len(sys.argv) < 2:

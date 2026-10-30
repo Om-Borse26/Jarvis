@@ -77,16 +77,19 @@ def focus_existing_window(app_query: str) -> Optional[str]:
         matched_hwnds = []
 
         def enum_cb(hwnd, _):
-            if win32gui.IsWindowVisible(hwnd):
-                title = win32gui.GetWindowText(hwnd).strip()
-                t_lower = title.lower()
-                for term in search_terms:
-                    # Ignore our own IDE window if searching for separate VS Code
-                    if term in ("visual studio code", " - code") and "antigravity" in t_lower:
-                        continue
-                    if term in t_lower:
-                        matched_hwnds.append((hwnd, title))
-                        break
+            try:
+                if win32gui.IsWindowVisible(hwnd):
+                    title = win32gui.GetWindowText(hwnd).strip()
+                    t_lower = title.lower()
+                    for term in search_terms:
+                        # Ignore our own IDE window if searching for separate VS Code
+                        if term in ("visual studio code", " - code") and "antigravity" in t_lower:
+                            continue
+                        if term in t_lower:
+                            matched_hwnds.append((hwnd, title))
+                            break
+            except Exception:
+                pass
             return True
 
         try:
@@ -144,15 +147,18 @@ def find_app_window(app_query: str):
         matches: List[Tuple[int, str]] = []
 
         def _cb(hwnd, _):
-            if win32gui.IsWindowVisible(hwnd):
-                title = win32gui.GetWindowText(hwnd).strip()
-                tl = title.lower()
-                for term in terms:
-                    if term in ("visual studio code", " - code") and "antigravity" in tl:
-                        continue
-                    if term and term in tl:
-                        matches.append((hwnd, title))
-                        break
+            try:
+                if win32gui.IsWindowVisible(hwnd):
+                    title = win32gui.GetWindowText(hwnd).strip()
+                    tl = title.lower()
+                    for term in terms:
+                        if term in ("visual studio code", " - code") and "antigravity" in tl:
+                            continue
+                        if term and term in tl:
+                            matches.append((hwnd, title))
+                            break
+            except Exception:
+                pass
             return True
 
         try:
@@ -316,15 +322,15 @@ class DynamicAppResolver:
         "whatsapp": "cmd /c start whatsapp:",
         "whats app": "cmd /c start whatsapp:",
         "spotify": "cmd /c start spotify:",
-        "calculator": "calc.exe",
-        "calc": "calc.exe",
-        "terminal": "wt.exe",
-        "cmd": "cmd.exe",
-        "command prompt": "cmd.exe",
-        "powershell": "powershell.exe",
-        "notepad": "notepad.exe",
-        "explorer": "explorer.exe",
-        "file explorer": "explorer.exe",
+        "calculator": "cmd /c start calc",
+        "calc": "cmd /c start calc",
+        "terminal": "cmd /c start wt",
+        "cmd": "cmd /c start cmd",
+        "command prompt": "cmd /c start cmd",
+        "powershell": "cmd /c start powershell",
+        "notepad": "cmd /c start notepad",
+        "explorer": "cmd /c start explorer",
+        "file explorer": "cmd /c start explorer",
         "settings": "cmd /c start ms-settings:",
         "camera": "cmd /c start microsoft.windows.camera:",
         "store": "cmd /c start ms-windows-store:",

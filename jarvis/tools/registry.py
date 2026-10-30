@@ -40,6 +40,21 @@ class ToolDefinition:
         return f"- {self.name}({params_str}): {self.description}"
 
 
+TOOL_NAME_ALIASES: dict[str, str] = {
+    "change_volume": "set_volume",
+    "adjust_volume": "set_volume",
+    "change_brightness": "set_brightness",
+    "adjust_brightness": "set_brightness",
+    "open_url": "open_website",
+    "browse_to": "open_website",
+    "navigate_to": "open_website",
+    "open_browser": "open_website",
+    "type_text": "keyboard_type",
+    "hotkey": "keyboard_hotkey",
+    "press_key": "keyboard_press",
+}
+
+
 class ToolRegistry:
     """Central registry and execution engine for all Jarvis tools."""
 
@@ -126,7 +141,8 @@ class ToolRegistry:
         logger.debug(f"External tool registered: [{category}] {name}")
 
     def get_tool(self, tool_name: str) -> Optional[ToolDefinition]:
-        return self._tools.get(tool_name)
+        resolved = TOOL_NAME_ALIASES.get(tool_name, tool_name)
+        return self._tools.get(resolved)
 
     def list_tools(self, category: Optional[str] = None) -> list[ToolDefinition]:
         """Return all registered tools, optionally filtered by category."""
