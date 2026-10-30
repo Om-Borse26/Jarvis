@@ -118,20 +118,7 @@ def focus_existing_window(app_query: str) -> Optional[str]:
             else:
                 target_hwnd, matched_title = matched_hwnds[0]
 
-            cur_fg = user32.GetForegroundWindow()
-            cur_thread = user32.GetWindowThreadProcessId(cur_fg, None)
-            my_thread = ctypes.windll.kernel32.GetCurrentThreadId()
-
-            try:
-                user32.AttachThreadInput(cur_thread, my_thread, True)
-                user32.ShowWindow(target_hwnd, win32con.SW_RESTORE)
-                user32.SetForegroundWindow(target_hwnd)
-                user32.AttachThreadInput(cur_thread, my_thread, False)
-            except Exception:
-                win32gui.ShowWindow(target_hwnd, win32con.SW_RESTORE)
-                win32gui.SetForegroundWindow(target_hwnd)
-
-            return matched_title
+            return _bring_to_front(target_hwnd) and matched_title
     except Exception as e:
         logger.debug(f"Window focus notice: {e}")
     return None
@@ -147,6 +134,10 @@ def find_app_window(app_query: str):
         import win32gui
 
         user32 = ctypes.windll.user32
+        hdesk = user32.OpenInputDesktop(0, False, 0x0100 | 0x0040)
+        if hdesk:
+            user32.SetThreadDesktop(hdesk)
+
         q = (app_query or "").lower().strip()
         terms = WINDOW_ALIAS_MAP.get(q, [q])
         matches: List[Tuple[int, str]] = []
@@ -473,29 +464,14 @@ class DynamicAppResolver:
                 label = _app_label(clean_q)
                 return f"{label} is already open, Sir. Say 'switch to {label}' to bring it up."
 
-            # Check if process is already running in background (e.g. still initializing window)
-            target_exe = rules_engine.resolve_process_name(clean_q)
-            target_exe_lower = target_exe.lower()
-
-            proc_running = False
-            for proc in psutil.process_iter(['name']):
-                try:
-                    pname = (proc.info['name'] or '').lower()
-                    if pname == target_exe_lower:
-                        if "antigravity" not in pname:
-                            proc_running = True
-                            break
-                except Exception:
-                    pass
-
-            if proc_running:
-                import time
+            # Check if process is already running with an open window
+            if is_app_open(clean_q):
+                win = find_app_window(clean_q)
+                if win and not background:
+                    _bring_to_front(win[0])
+                    return f"Switched to {_app_label(clean_q)}, Sir."
                 label = _app_label(clean_q)
-                for _ in range(5):
-                    time.sleep(0.5)
-                    if is_app_open(clean_q):
-                        return f"{label} is already open, Sir. Say 'switch to {label}' to bring it up."
-                return f"{label} is already running in the background, Sir."
+                return f"{label} is already open, Sir. Say 'switch to {label}' to bring it up."
 
         match = self.resolve(query)
         if not match:

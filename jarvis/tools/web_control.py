@@ -50,6 +50,10 @@ def navigate_or_open_browser(url: str, force_new: bool = False, new_tab: bool = 
             cur_thread = user32.GetWindowThreadProcessId(cur_fg, None)
             my_thread = ctypes.windll.kernel32.GetCurrentThreadId()
 
+            # Windows 11 bypass foreground lock
+            user32.keybd_event(0x12, 0, 0, 0)
+            user32.keybd_event(0x12, 0, 2, 0)
+
             try:
                 user32.AttachThreadInput(cur_thread, my_thread, True)
                 user32.ShowWindow(target_hwnd, win32con.SW_RESTORE)
@@ -110,6 +114,11 @@ def _focus_active_browser() -> bool:
         cur_fg = user32.GetForegroundWindow()
         cur_thread = user32.GetWindowThreadProcessId(cur_fg, None)
         my_thread = ctypes.windll.kernel32.GetCurrentThreadId()
+
+        # Windows 11 bypass foreground lock
+        user32.keybd_event(0x12, 0, 0, 0)
+        user32.keybd_event(0x12, 0, 2, 0)
+
         try:
             user32.AttachThreadInput(cur_thread, my_thread, True)
             user32.ShowWindow(target, win32con.SW_RESTORE)

@@ -100,7 +100,9 @@ class _NativeWorker:
             return 1.0
 
     def _apply_mode(self, mode: str) -> None:
-        import win32api, win32con, win32gui
+        import win32api
+        import win32con
+        import win32gui
         hwnd = self._hwnd()
         if not hwnd:
             return
@@ -114,7 +116,8 @@ class _NativeWorker:
         win32gui.SetWindowRgn(hwnd, region, True)
 
     def _apply_z(self, where: str) -> None:
-        import win32con, win32gui
+        import win32con
+        import win32gui
         hwnd = self._hwnd()
         if not hwnd:
             return
@@ -127,7 +130,8 @@ class _NativeWorker:
 
     def hide_from_taskbar(self) -> None:
         try:
-            import win32con, win32gui
+            import win32con
+            import win32gui
             hwnd = self._hwnd()
             if hwnd:
                 ex = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
@@ -158,7 +162,9 @@ class IslandApi:
 
 def _start_parent_watchdog() -> None:
     """Exit automatically if the parent process dies to prevent orphaned windows."""
-    import os, time, sys
+    import os
+    import sys
+    import time
     parent_pid = None
     for arg in sys.argv:
         if arg.startswith("--parent-pid="):
@@ -166,12 +172,7 @@ def _start_parent_watchdog() -> None:
                 parent_pid = int(arg.split("=", 1)[1])
             except Exception:
                 pass
-    if parent_pid is None:
-        try:
-            parent_pid = os.getppid()
-        except Exception:
-            return
-    if not parent_pid or parent_pid <= 1:
+    if parent_pid is None or parent_pid <= 1:
         return
 
     def _watch():
@@ -220,7 +221,7 @@ def run() -> None:
         js_api=api,
     )
 
-    def _on_loaded():
+    def _on_loaded(*args, **kwargs):
         worker.hide_from_taskbar()
         worker.submit("mode", "collapsed")
         worker.submit("z", "back")

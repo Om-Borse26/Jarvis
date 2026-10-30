@@ -66,7 +66,9 @@ def _watch(port: int, window) -> None:
 
 def _start_parent_watchdog() -> None:
     """Exit automatically if the parent process dies to prevent orphaned windows."""
-    import os, time, sys
+    import os
+    import time
+    import sys
     parent_pid = None
     for arg in sys.argv:
         if arg.startswith("--parent-pid="):
@@ -74,12 +76,7 @@ def _start_parent_watchdog() -> None:
                 parent_pid = int(arg.split("=", 1)[1])
             except Exception:
                 pass
-    if parent_pid is None:
-        try:
-            parent_pid = os.getppid()
-        except Exception:
-            return
-    if not parent_pid or parent_pid <= 1:
+    if parent_pid is None or parent_pid <= 1:
         return
 
     def _watch():
@@ -105,9 +102,8 @@ def run() -> None:
     try:
         screen = webview.screens[0] if getattr(webview, "screens", None) else None
         width = screen.width if screen else 1280
-        height = screen.height if screen else 800
     except Exception:
-        width, height = 1280, 800
+        width = 1280
 
     window = webview.create_window(
         "Jarvis HUD",
