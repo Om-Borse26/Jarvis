@@ -30,7 +30,8 @@ from jarvis.audio.stt     import STTEngine
 from jarvis.audio.tts     import TTSEngine
 from jarvis.audio.mood    import MoodEngine
 from jarvis.brain.ollama_client import OllamaClient
-from jarvis.brain.llm_provider import make_llm_client
+from jarvis.brain.llm_provider import make_llm_client, make_cloud_client, is_hybrid
+from jarvis.core.privacy import allow_cloud
 from jarvis.core.arbiter  import SteerArbiter
 from jarvis.core.config   import load_config
 from jarvis.core.clarify  import missing_slot_question
@@ -53,6 +54,14 @@ from jarvis.ui.state import state_bridge
 from jarvis.ui.server import ControlServer
 
 
+# Minimal persona prompt for cloud turns — carries NO private context on purpose.
+CLOUD_CHAT_PROMPT = (
+    "You are Jarvis, a calm, witty British AI assistant. Reply in one or two short, "
+    "natural spoken sentences. Address the user as 'Sir'. You are chatting or answering "
+    "a general question — do not mention tools, files, or the user's device."
+)
+
+
 class JarvisPipeline:
     """
     The top-level orchestrator.
@@ -68,6 +77,8 @@ class JarvisPipeline:
         self.tts         = TTSEngine()
         self.mood        = MoodEngine()
         self.llm         = make_llm_client()
+        # Cloud model for non-private turns only (privacy-aware routing).
+        self.cloud_llm   = make_cloud_client() if is_hybrid() else None
         self.arbiter     = SteerArbiter(self.tts, self.llm)
         self.screen_tool = ScreenTool()
         self.tool_router = ToolRouter()
@@ -513,12 +524,29 @@ class JarvisPipeline:
             # toolset (external MCP tools only when explicitly in scope).
             tools, scoped = select_tools(text)
             logger.debug(f"🎯 Tool scope: {scoped or ('none' if not tools else 'core')} ({len(tools)} tools)")
-            decision = await self.llm.chat_with_tools(
-                messages     = messages,
-                tools        = tools,
-                cancel_event = self._cancel_llm,
-                temperature  = mood_state.temperature,
-            )
+
+            # Privacy-aware routing: non-private, no-tool turns may go to the cloud
+            # model (fast, better chat) with a MINIMAL prompt that carries no private
+            # context. Everything else stays local.
+            use_cloud = self.cloud_llm is not None and allow_cloud(text, bool(tools))
+            if use_cloud:
+                logger.info("☁️ Cloud model for this non-private turn.")
+                client = self.cloud_llm
+                cloud_messages = [{"role": "system", "content": CLOUD_CHAT_PROMPT},
+                                  {"role": "user", "content": text}]
+                decision = await client.chat_with_tools(
+                    messages     = cloud_messages,
+                    tools        = [],
+                    cancel_event = self._cancel_llm,
+                    temperature  = mood_state.temperature,
+                )
+            else:
+                decision = await self.llm.chat_with_tools(
+                    messages     = messages,
+                    tools        = tools,
+                    cancel_event = self._cancel_llm,
+                    temperature  = mood_state.temperature,
+                )
             final_response = ""
             if self._cancel_llm.is_set():
                 final_response = ""

@@ -45,16 +45,52 @@ _PRESETS = {
 
 
 def make_llm_client():
-    """Return the LLM client selected by env/config (default: local Ollama)."""
+    """Return the LLM client selected by env/config (default: local Ollama).
+
+    In 'hybrid' mode the primary (returned) client is the LOCAL one; the cloud
+    client is obtained separately via make_cloud_client() and used only for
+    non-private turns by the pipeline.
+    """
     load_env_file()
-    provider = (os.environ.get("JARVIS_LLM_PROVIDER")
-                or load_config().get("llm", {}).get("provider")
-                or "ollama").lower().strip()
+    provider = _primary_provider()
     if provider in _PRESETS:
         logger.info(f"[LLM] Using cloud provider '{provider}'.")
         return OpenAICompatClient(provider)
     from jarvis.brain.ollama_client import OllamaClient
     return OllamaClient()
+
+
+def _primary_provider() -> str:
+    provider = (os.environ.get("JARVIS_LLM_PROVIDER")
+                or load_config().get("llm", {}).get("provider")
+                or "ollama").lower().strip()
+    if provider == "hybrid":
+        return (os.environ.get("JARVIS_LOCAL_PROVIDER")
+                or load_config().get("llm", {}).get("local_provider")
+                or "ollama").lower().strip()
+    return provider
+
+
+def is_hybrid() -> bool:
+    """True when privacy-aware cloud routing is enabled."""
+    return (os.environ.get("JARVIS_LLM_PROVIDER")
+            or load_config().get("llm", {}).get("provider")
+            or "ollama").lower().strip() == "hybrid"
+
+
+def make_cloud_client():
+    """Return the configured cloud client (default gemini) if a key is present, else None."""
+    load_env_file()
+    cloud = (os.environ.get("JARVIS_CLOUD_PROVIDER")
+             or load_config().get("llm", {}).get("cloud_provider")
+             or "gemini").lower().strip()
+    if cloud not in _PRESETS:
+        return None
+    if not os.environ.get(_PRESETS[cloud]["key_env"], "").strip():
+        logger.warning(f"[LLM] Cloud routing requested but {_PRESETS[cloud]['key_env']} is unset.")
+        return None
+    logger.info(f"[LLM] Cloud routing enabled via '{cloud}' (non-private turns only).")
+    return OpenAICompatClient(cloud)
 
 
 class OpenAICompatClient:
