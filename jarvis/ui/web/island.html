@@ -166,6 +166,19 @@
     el.addEventListener("click", e => { e.stopPropagation(); setMode(el.getAttribute("data-mode")); }));
 
   // ── Data loaders ──
+  function fmtWhen(x){
+    if (x.when || x.time) return x.when || x.time;
+    if (x.fire_at){
+      const d = new Date(x.fire_at * 1000);
+      const mins = Math.round((d - Date.now()) / 60000);
+      const clock = d.toLocaleTimeString([], {hour: "numeric", minute: "2-digit"});
+      if (mins < 0) return clock;
+      if (mins < 60) return `in ${mins} min`;
+      if (mins < 1440) return clock;
+      return d.toLocaleDateString([], {month: "short", day: "numeric"}) + " " + clock;
+    }
+    return "";
+  }
   async function loadReminders(){
     const body = document.getElementById("remBody");
     try{
@@ -174,7 +187,7 @@
       const items = d.reminders || [];
       body.innerHTML = items.length ? items.map(x =>
         `<div class="row"><span>${esc(x.text || x.title || "Reminder")}</span>
-         <span class="muted">${esc(x.when || x.time || "")}</span></div>`).join("")
+         <span class="muted">${esc(fmtWhen(x))}</span></div>`).join("")
         : `<div class="muted">No reminders or meetings scheduled.</div>`;
       body.classList.add("fade");
     }catch(e){ body.innerHTML = `<div class="muted">Couldn't load reminders.</div>`; }

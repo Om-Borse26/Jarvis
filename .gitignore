@@ -48,3 +48,8 @@ desktop.ini
 
 # HuggingFace cache
 .cache/
+
+# Test/inspection artifacts
+.playwright-mcp/
+/dash.png
+/island_*.png

@@ -151,6 +151,22 @@ def test_open_youtube_fast_path(monkeypatch, utterance):
     assert execute.await_args.args[0] == "open_website"
 
 
+# ── Brightness vs volume routing (brightness must not hit volume) ────────
+@pytest.mark.parametrize(("utterance", "tool"), [
+    ("set brightness to 80", "set_brightness"),
+    ("set volume to 40", "set_volume"),
+    ("increase brightness", "change_brightness_relative"),
+    ("dim the screen", "change_brightness_relative"),
+    ("whats the brightness", "get_brightness"),
+    ("volume up", "change_volume_relative"),
+])
+def test_brightness_and_volume_routing(monkeypatch, utterance, tool):
+    execute = AsyncMock(return_value={"result": "ok"})
+    monkeypatch.setattr(registry, "execute", execute)
+    asyncio.run(ToolRouter().try_fast_path(utterance))
+    assert execute.await_args_list[0].args[0] == tool
+
+
 # ── Island bridge must stay freeze-safe ──────────────────────────────────
 def test_island_api_has_no_public_attributes():
     from jarvis.ui.island import IslandApi

@@ -75,9 +75,11 @@ class ToolRouter:
 
         # ── Audio & Volume Controls ───────────────────────────────────────
         # 1. Absolute volume: "laptop's volume to 90%", "turn volume up to 90", "volume 80"
-        vol_match = re.search(r"(?:volume|sound|audio|laptop.*?volume).*?(\d{1,3})\s*(?:%|percent)?", text)
-        if not vol_match:
-            vol_match = re.search(r"(?:increase|decrease|turn|make|set|put).*?(?:to|at)\s+(\d{1,3})\s*(?:%|percent)?", text)
+        vol_match = None
+        if "bright" not in text:   # 'set brightness to 80' must not hit volume
+            vol_match = re.search(r"(?:volume|sound|audio|laptop.*?volume).*?(\d{1,3})\s*(?:%|percent)?", text)
+            if not vol_match:
+                vol_match = re.search(r"(?:increase|decrease|turn|make|set|put).*?(?:to|at)\s+(\d{1,3})\s*(?:%|percent)?", text)
         if vol_match:
             val = int(vol_match.group(1))
             if 0 <= val <= 100:
@@ -109,6 +111,30 @@ class ToolRouter:
 
         if text in ("get volume", "what is the volume", "what's the volume", "check volume"):
             res = await registry.execute("get_volume")
+            return res.get("result")
+
+        # ── Screen Brightness ─────────────────────────────────────────────
+        bright_set = re.search(r"(?:set\s+)?(?:the\s+)?brightness\s+(?:to\s+)?(\d{1,3})\s*(?:%|percent)?", text)
+        if not bright_set:
+            bright_set = re.search(r"(?:brightness|screen)\s+(?:to\s+)?(\d{1,3})\s*(?:%|percent)", text)
+        if bright_set:
+            val = int(bright_set.group(1))
+            if 0 <= val <= 100:
+                res = await registry.execute("set_brightness", percent=val)
+                return res.get("result", f"Screen brightness set to {val} percent.")
+
+        if re.search(r"(?:increase|turn\s+up|raise|boost|brighten)\s+(?:the\s+)?(?:screen\s+)?brightness", text) or text in ("brighter", "brighten the screen", "increase brightness", "brightness up"):
+            res = await registry.execute("change_brightness_relative", delta_percent=15)
+            return res.get("result", "Brightness raised, Sir.")
+
+        if re.search(r"(?:decrease|turn\s+down|lower|reduce|dim)\s+(?:the\s+)?(?:screen\s+)?brightness", text) or text in ("dimmer", "dim the screen", "decrease brightness", "brightness down", "dim"):
+            res = await registry.execute("change_brightness_relative", delta_percent=-15)
+            return res.get("result", "Brightness lowered, Sir.")
+
+        if text in ("get brightness", "what is the brightness", "what's the brightness",
+                    "whats the brightness", "check brightness", "brightness level",
+                    "how bright is the screen"):
+            res = await registry.execute("get_brightness")
             return res.get("result")
 
         # ── Active Application & Workspace Context ────────────────────────

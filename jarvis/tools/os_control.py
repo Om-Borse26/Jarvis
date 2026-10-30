@@ -129,6 +129,65 @@ def change_volume_relative(delta_percent: int = 10) -> str:
         return f"Failed to adjust volume: {e}"
 
 
+@register_tool(name="set_brightness", description="Set the laptop screen brightness to a percentage (0 to 100).", category="system")
+def set_brightness(percent: int) -> str:
+    """Set the display brightness (0-100) via WMI."""
+    level = max(0, min(100, int(percent)))
+    try:
+        subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             f"(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1,{level})"],
+            capture_output=True, timeout=5, check=True,
+        )
+        return f"Screen brightness set to {level} percent."
+    except Exception as e:
+        logger.error(f"Set brightness error: {e}")
+        return "I couldn't change the brightness — this PC may not support software brightness control."
+
+
+@register_tool(name="get_brightness", description="Check the current laptop screen brightness percentage.", category="system")
+def get_brightness() -> str:
+    """Read the current display brightness (0-100) via WMI."""
+    try:
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightness).CurrentBrightness"],
+            capture_output=True, text=True, timeout=5,
+        )
+        val = res.stdout.strip().splitlines()[0].strip() if res.stdout.strip() else ""
+        if val.isdigit():
+            return f"Screen brightness is at {val} percent."
+        return "I couldn't read the brightness on this display."
+    except Exception as e:
+        logger.error(f"Get brightness error: {e}")
+        return "I couldn't read the brightness on this display."
+
+
+@register_tool(name="change_brightness_relative", description="Increase or decrease screen brightness by a percentage delta (e.g. +10 or -10).", category="system")
+def change_brightness_relative(delta_percent: int = 10) -> str:
+    """Adjust display brightness relative to its current level via WMI."""
+    try:
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightness).CurrentBrightness"],
+            capture_output=True, text=True, timeout=5,
+        )
+        cur = res.stdout.strip().splitlines()[0].strip() if res.stdout.strip() else ""
+        if not cur.isdigit():
+            return "I couldn't read the current brightness on this display."
+        new_level = max(0, min(100, int(cur) + int(delta_percent)))
+        subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             f"(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1,{new_level})"],
+            capture_output=True, timeout=5, check=True,
+        )
+        action = "raised" if delta_percent > 0 else "lowered"
+        return f"Brightness {action} to {new_level} percent, Sir."
+    except Exception as e:
+        logger.error(f"Relative brightness error: {e}")
+        return "I couldn't adjust the brightness on this display."
+
+
 @register_tool(name="get_current_active_window", description="Identify the currently focused application and active window title.", category="window")
 def get_current_active_window() -> str:
     """Get active window title and process name."""
