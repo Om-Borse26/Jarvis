@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ctypes
 import subprocess
+from typing import Optional
 import pyautogui
 from loguru import logger
 from jarvis.tools.registry import register_tool
@@ -27,13 +28,15 @@ def _get_speakers():
 
 
 @register_tool(name="set_volume", description="Set master system audio volume to a percentage (0 to 100).", category="audio")
-def set_volume(percent: int) -> str:
+def set_volume(percent: int = 50, volume: Optional[int] = None, *args, **kwargs) -> str:
     """Set master system audio volume to a percentage (0 to 100)."""
     try:
+        val = volume if volume is not None else percent
+        val = int(val)
         spk = _get_speakers()
-        level = max(0.0, min(1.0, float(percent) / 100.0))
+        level = max(0.0, min(1.0, float(val) / 100.0))
         spk.EndpointVolume.SetMasterVolumeLevelScalar(level, None)
-        return f"Master volume set to {percent} percent."
+        return f"Master volume set to {val} percent."
     except Exception as e:
         logger.error(f"Set volume error: {e}")
         return f"Failed to set volume: {e}"
@@ -133,10 +136,11 @@ def change_volume_relative(delta_percent: int = 10) -> str:
 
 
 @register_tool(name="set_brightness", description="Set the laptop screen brightness to a percentage (0 to 100).", category="system")
-def set_brightness(percent: int) -> str:
+def set_brightness(percent: int = 50, brightness: Optional[int] = None, *args, **kwargs) -> str:
     """Set the display brightness (0-100) via WMI."""
-    level = max(0, min(100, percent))
+    val = brightness if brightness is not None else percent
     try:
+        level = max(0, min(100, int(val)))
         subprocess.run(
             ["powershell", "-NoProfile", "-Command",
              f"(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1,{level})"],

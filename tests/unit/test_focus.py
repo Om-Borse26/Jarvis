@@ -56,7 +56,7 @@ def test_bare_focus_asks_which_app(monkeypatch):
 
 
 def test_focus_does_not_hijack_media_or_tab_commands(monkeypatch):
-    execute = AsyncMock()
+    execute = AsyncMock(return_value={"result": "ok"})
     monkeypatch.setattr(registry, "execute", execute)
     # "switch to next tab" should not be treated as focusing an app called "next tab".
     for utterance in ("show me the next video", "switch to next tab"):

@@ -151,10 +151,19 @@ def execute_shell(command: str, timeout: int = 30, cwd: str = "") -> str:
     description="Write code or text content to a file. Creates parent directories automatically. Use for generating code files, configs, scripts, etc.",
     category="code"
 )
-def write_code_to_file(file_path: str, code: str, language: str = "python") -> str:
+def write_code_to_file(file_path: str, code: str, language: str = "python", *args, **kwargs) -> str:
     """Write generated code to a file on disk."""
+    clean_p = file_path.strip().strip('"').strip("'")
+    if not clean_p or clean_p.lower() in ("path/to/file", "path\\to\\file", "path/to", "file_path", "filename"):
+        return "Failed to write file: Invalid placeholder path. Please specify an actual destination file name."
+
     try:
-        p = Path(file_path)
+        p = Path(clean_p)
+        if not p.is_absolute():
+            from jarvis.tools.file_control import get_active_vscode_workspace
+            ws = get_active_vscode_workspace()
+            if ws and ws.exists():
+                p = ws / p
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(code, encoding="utf-8")
         lines = code.count("\n") + 1

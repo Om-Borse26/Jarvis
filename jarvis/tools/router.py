@@ -220,6 +220,23 @@ class ToolRouter:
             res = await registry.execute("show_desktop")
             return "Desktop displayed, Sir."
 
+        # ── Window Size & Display Controls ────────────────────────────────
+        fs_match = re.search(r"(?:make\s+)?([a-zA-Z0-9_\-\s]+?)?\s*(?:full\s*screen|fullscreen)", clean_cmd)
+        if fs_match:
+            app_target = fs_match.group(1).strip() if fs_match.group(1) else ""
+            if app_target and app_target not in ("it", "this", "the window", "window", "can you"):
+                await registry.execute("focus_application", app_name=app_target)
+            await registry.execute("keyboard_hotkey", hotkey="f11")
+            return f"Toggled full screen for {app_target or 'active window'}, Sir."
+
+        max_match = re.search(r"(?:maximize|make\s+maximized)\s*(?:the\s+)?([a-zA-Z0-9_\-\s]+)?", clean_cmd)
+        if max_match and "volume" not in clean_cmd and "brightness" not in clean_cmd:
+            app_target = max_match.group(1).strip() if max_match.group(1) else ""
+            if app_target and app_target not in ("it", "this", "the window", "window", "can you"):
+                await registry.execute("focus_application", app_name=app_target)
+            await registry.execute("keyboard_hotkey", hotkey="win+up")
+            return f"Maximized {app_target or 'active window'}, Sir."
+
         # ── Hardware & Telemetry ──────────────────────────────────────────
         hardware_queries = [
             "gpu temp", "gpu temperature", "what is my gpu temp", "what's my gpu temp",
@@ -386,6 +403,7 @@ class ToolRouter:
             r"(?:show\s+(?:me\s+)?)(.+?)(?:\s+on\s+youtube|\s+videos)",
             r"^(?:open|search)\s+(?:up\s+|for\s+|some\s+)?(.+?)\s+videos$",
         ]
+        is_play_intent = any(w in clean_for_ch.lower() for w in ["open", "play", "watch", "see"])
         for pattern in yt_patterns:
             m = re.search(pattern, clean_for_ch)
             if m:
@@ -393,8 +411,12 @@ class ToolRouter:
                 query = re.sub(r"^(?:some|a|the)\s+", "", query).strip()
                 if query:
                     search_q = f"{query} videos" if not query.endswith("videos") else query
-                    res = await registry.execute("search_youtube", query=search_q, force_new=force_new, new_tab=is_new_tab)
-                    return res.get("result", f"Opening {search_q} on YouTube, Sir.")
+                    if is_play_intent:
+                        res = await registry.execute("play_youtube_video", query=search_q)
+                        return res.get("result", f"Playing {search_q} on YouTube, Sir.")
+                    else:
+                        res = await registry.execute("search_youtube", query=search_q, force_new=force_new, new_tab=is_new_tab)
+                        return res.get("result", f"Opening {search_q} on YouTube, Sir.")
 
         # ── WhatsApp Messaging & Management ──────────────────────────────
         # "send a message on academic group", "I want to send a message on a whatsapp group"

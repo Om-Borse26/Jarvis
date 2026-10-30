@@ -10,6 +10,7 @@ Provides voice-accessible tools to:
 from __future__ import annotations
 
 import os
+import re
 import json
 import urllib.parse
 import subprocess
@@ -76,6 +77,19 @@ def get_active_vscode_workspace() -> Optional[Path]:
                         for t in open_titles:
                             if p.name.lower() in t.lower():
                                 return p
+            except Exception:
+                pass
+
+        # Fallback to the most recently modified workspace in storage if VS Code is running
+        for _, f in entries[:5]:
+            try:
+                data = json.loads(f.read_text("utf-8"))
+                folder_uri = data.get("folder")
+                if folder_uri and folder_uri.startswith("file:///"):
+                    raw = urllib.parse.unquote(folder_uri[8:])
+                    p = Path(raw)
+                    if p.exists() and p.is_dir() and p.name != "test_dummy_dir":
+                        return p
             except Exception:
                 pass
     except Exception as e:
@@ -166,17 +180,29 @@ def read_file(file_path: str, max_chars: int = 2000) -> str:
     description="Create a new file with optional content. If directory is omitted, 'here', or 'in it', automatically resolves to the open VS Code workspace folder or Desktop.",
     category="filesystem"
 )
-def create_file(filename: str, content: str = "", directory: str = "") -> str:
+def create_file(
+    filename: str = "",
+    content: str = "",
+    directory: str = "",
+    in_vscode: bool = False,
+    *args,
+    **kwargs,
+) -> str:
     """Create a new file, resolving 'here' or 'in it' to the active VS Code workspace or Desktop."""
-    clean_name = filename.strip('"').strip("'").strip()
+    raw_name = filename or kwargs.get("name") or kwargs.get("file_path") or kwargs.get("path") or ""
+    clean_name = raw_name.strip('"').strip("'").strip()
     if not clean_name:
         return "Please specify a filename, Sir."
+
+    # Normalize speech recognition oddities like "demo dot TXD" or "demo dot TXT" -> "demo.txt"
+    clean_name = re.sub(r"\bdot\s+([a-zA-Z0-9]+)\b", r".\1", clean_name, flags=re.I)
+    clean_name = re.sub(r"\.txd\b", ".txt", clean_name, flags=re.I)
 
     p_name = Path(clean_name)
     target_dir: Optional[Path] = None
 
     clean_dir = directory.strip('"').strip("'").strip().lower()
-    if clean_dir in ("", "here", "in it", "current", "this folder", "workspace", "vscode"):
+    if in_vscode or clean_dir in ("", "here", "in it", "current", "this folder", "workspace", "vscode", "vs code", "v.s code"):
         ws = get_active_vscode_workspace()
         if ws and ws.exists():
             target_dir = ws

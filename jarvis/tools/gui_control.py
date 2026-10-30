@@ -46,13 +46,16 @@ def keyboard_type(text: str) -> str:
         return f"Typing failed: {e}"
 
 
-@register_tool(name="keyboard_hotkey", description="Press a Windows keyboard shortcut (e.g. 'ctrl+c', 'ctrl+v', 'alt+tab', 'win+d', 'alt+f4').", category="gui")
-def keyboard_hotkey(hotkey: str) -> str:
+@register_tool(name="keyboard_hotkey", description="Press a Windows keyboard shortcut (e.g. 'ctrl+c', 'ctrl+v', 'alt+tab', 'win+d', 'alt+f4', 'f11').", category="gui")
+def keyboard_hotkey(hotkey: str = "", keys: str = "", *args, **kwargs) -> str:
     """Press a Windows keyboard shortcut."""
+    clean_combo = hotkey or keys or kwargs.get("shortcut") or kwargs.get("key") or ""
+    if not clean_combo:
+        return "No shortcut combination provided, Sir."
     try:
-        keys = [k.strip().lower() for k in hotkey.split("+")]
-        pyautogui.hotkey(*keys)
-        return f"Pressed shortcut {hotkey}."
+        key_list = [k.strip().lower() for k in clean_combo.split("+")]
+        pyautogui.hotkey(*key_list)
+        return f"Pressed shortcut {clean_combo}."
     except Exception as e:
         return f"Shortcut failed: {e}"
 
@@ -68,8 +71,11 @@ def keyboard_press(key: str) -> str:
 
 
 @register_tool(name="focus_window", description="Bring an open window to the front by title keyword (e.g. 'Brave', 'Code', 'Discord').", category="window")
-def focus_window(title_keyword: str) -> str:
+def focus_window(title_keyword: str = "", name: str = "", title: str = "", app_name: str = "", *args, **kwargs) -> str:
     """Bring an open window to the front by title keyword."""
+    kw = title_keyword or name or title or app_name or kwargs.get("app") or ""
+    if not kw:
+        return "Please specify which window to focus, Sir."
     try:
         import win32gui
         import win32con
@@ -80,16 +86,16 @@ def focus_window(title_keyword: str) -> str:
         def enum_cb(hwnd, _):
             nonlocal target_hwnd, target_title
             if win32gui.IsWindowVisible(hwnd):
-                title = win32gui.GetWindowText(hwnd)
-                if title_keyword.lower() in title.lower():
+                t = win32gui.GetWindowText(hwnd)
+                if kw.lower() in t.lower():
                     target_hwnd = hwnd
-                    target_title = title
+                    target_title = t
 
         win32gui.EnumWindows(enum_cb, None)
         if target_hwnd:
             win32gui.ShowWindow(target_hwnd, win32con.SW_RESTORE)
             win32gui.SetForegroundWindow(target_hwnd)
             return f"Switched focus to '{target_title}'."
-        return f"No open window matching '{title_keyword}' found."
+        return f"No open window matching '{kw}' found."
     except Exception as e:
         return f"Failed to focus window: {e}"

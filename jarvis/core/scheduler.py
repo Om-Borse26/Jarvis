@@ -335,13 +335,15 @@ def _fmt_eta(fire_at: float) -> str:
     description="Set a one-time reminder. `when` accepts 'in 10 minutes', 'in 2 hours', 'at 3pm', 'tomorrow at 9am'. `importance` can be 'normal', 'important', or 'critical' — only important/critical reminders resurface if they were missed while the PC was off (normal ones are handed to Eve instead).",
     category="scheduler",
 )
-def set_reminder(text: str, when: str, importance: str = "normal") -> str:
+def set_reminder(text: str = "", when: str = "in 5 minutes", importance: str = "normal", reminder: str = "", *args, **kwargs) -> str:
     """Schedule a one-shot spoken reminder."""
-    parsed = parse_when(when)
+    clean_text = text or reminder or kwargs.get("message") or kwargs.get("task") or "Reminder"
+    clean_when = when or kwargs.get("time") or "in 5 minutes"
+    parsed = parse_when(clean_when)
     if not parsed:
-        return f"I couldn't understand the time '{when}'. Try 'in 10 minutes' or 'at 3pm'."
-    imp = importance.lower() if importance.lower() in ("normal", "important", "critical") else "normal"
-    jid = scheduler.add_job("once", text, parsed["fire_at"], None, action="speak", importance=imp)
+        return f"I couldn't understand the time '{clean_when}'. Try 'in 10 minutes' or 'at 3pm'."
+    imp = importance.lower() if str(importance).lower() in ("normal", "important", "critical") else "normal"
+    jid = scheduler.add_job("once", clean_text, parsed["fire_at"], None, action="speak", importance=imp)
     return f"Reminder set ({jid}). I'll remind you {_fmt_eta(parsed['fire_at'])}."
 
 

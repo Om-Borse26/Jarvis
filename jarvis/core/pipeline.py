@@ -62,6 +62,14 @@ CLOUD_CHAT_PROMPT = (
     "a general question — do not mention tools, files, or the user's device."
 )
 
+SCREEN_CAPTURE_PAT = re.compile(
+    r"\b(screenshot|capture (?:the |my )?screen|look at (?:the |my )?screen|"
+    r"what(?:'s| is) on (?:the |my )?screen|see (?:the |my )?screen|"
+    r"read (?:the |my )?screen|inspect (?:the |my )?screen|what do you see)\b",
+    re.IGNORECASE,
+)
+
+
 
 class JarvisPipeline:
     """
@@ -485,10 +493,10 @@ class JarvisPipeline:
                 ])
                 return
 
-            # Check for screen / vision command
+            # Check for screen / vision inspection command (exclude full screen, brightness, lock screen)
             lower_query = text.lower()
-            screen_keywords = ["screenshot", "screen", "what do you see", "look at my screen", "what's on my screen", "what is on my screen", "see my screen", "read my screen"]
-            if any(k in lower_query for k in screen_keywords):
+            is_screen_control = any(w in lower_query for w in ["full screen", "fullscreen", "lock screen", "brightness", "dim screen", "brighten"])
+            if not is_screen_control and SCREEN_CAPTURE_PAT.search(lower_query):
                 logger.info("📸 Screen inspection requested. Capturing desktop context...")
                 screen_ctx = await self._handle_screen_request()
                 text = f"{text}\n\n{screen_ctx}"

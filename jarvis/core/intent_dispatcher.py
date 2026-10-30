@@ -136,10 +136,17 @@ class IntentDispatcher:
 
     async def _call_reformatter(self, user_query: str, active_app: str = "Desktop") -> Optional[dict]:
         """Execute semantic reformatting call in background thread with local Ollama fallback."""
+        import inspect
         tools_summary = []
         for tool in registry.list_tools():
             desc = tool.description or ""
-            tools_summary.append(f"- {tool.name}: {desc[:120]}")
+            try:
+                sig = inspect.signature(tool.func)
+                param_names = [p.name for p in sig.parameters.values() if p.name not in ("args", "kwargs")]
+                params_str = f"({', '.join(param_names)})"
+            except Exception:
+                params_str = "()"
+            tools_summary.append(f"- {tool.name}{params_str}: {desc[:100]}")
         summary_text = "\n".join(tools_summary)
 
         system_prompt = REFORMATTER_SYSTEM_PROMPT.format(

@@ -151,19 +151,58 @@ class ToolRegistry:
 
         safe_kwargs = self._redact(kwargs)
         try:
+            call_kwargs = self._adapt_kwargs(tool.func, tool_name, kwargs)
             logger.info(f"⚡ Executing tool: {tool_name}({safe_kwargs})")
             if inspect.iscoroutinefunction(tool.func):
-                result = await tool.func(**kwargs)
+                result = await tool.func(**call_kwargs)
             else:
                 # Run blocking tools off the event loop so one slow/hung tool
                 # can't freeze the whole assistant (audio, hotkey, TTS).
-                result = await asyncio.to_thread(tool.func, **kwargs)
+                result = await asyncio.to_thread(tool.func, **call_kwargs)
             self._audit(tool_name, kwargs, "success", str(result))
             return {"status": "success", "result": result}
         except Exception as e:
             logger.error(f"Tool execution failed for '{tool_name}': {e}")
             self._audit(tool_name, kwargs, "error", str(e))
             return {"status": "error", "message": f"Error running {tool_name}: {str(e)}"}
+
+    @staticmethod
+    def _adapt_kwargs(func: Callable, tool_name: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Adapt calling arguments to match the function's actual parameter names."""
+        sig = inspect.signature(func)
+        params = sig.parameters
+
+        has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+        COMMON_ALIASES = {
+            "percent": ["volume", "brightness", "level", "val", "percentage"],
+            "level": ["percent", "volume", "brightness", "val"],
+            "text": ["reminder", "message", "task", "note", "content", "query", "reminder_text"],
+            "when": ["time", "date", "delay", "at", "after"],
+            "filename": ["file_name", "path", "file_path", "name", "target_file"],
+            "file_path": ["path", "filename", "file_name", "target_file"],
+            "directory": ["dir", "folder", "target_dir", "path"],
+            "title_keyword": ["name", "title", "app_name", "app", "window", "keyword"],
+            "app_name": ["name", "app", "title", "title_keyword", "application"],
+            "hotkey": ["keys", "shortcut", "key"],
+            "keys": ["hotkey", "shortcut", "key"],
+            "query": ["search", "search_query", "topic", "q"],
+        }
+
+        adapted = dict(kwargs)
+
+        for param_name in params.keys():
+            if param_name in adapted:
+                continue
+            targets = COMMON_ALIASES.get(param_name, [])
+            for t in targets:
+                if t in adapted:
+                    adapted[param_name] = adapted[t]
+                    break
+
+        if not has_var_keyword:
+            return {k: v for k, v in adapted.items() if k in params}
+        return adapted
 
     @staticmethod
     def _redact(args: dict[str, Any]) -> dict[str, Any]:

@@ -193,3 +193,48 @@ def test_island_geometry_centered_and_scaled():
     assert (w, h) == (475, 67)
     _, _, w, h, _ = compute_geometry("dashboard", 1280, 720, 1.0)
     assert w <= 1280 and h <= 720
+
+
+# ── Parameter alias adaptors in registry.execute ────────────────────────
+def test_adapt_kwargs_aliases():
+    from jarvis.tools.registry import registry
+    def dummy_vol(percent: int = 50): pass
+    adapted = registry._adapt_kwargs(dummy_vol, "set_volume", {"volume": 50})
+    assert adapted == {"percent": 50}
+
+    def dummy_rem(text: str = "", when: str = ""): pass
+    adapted_rem = registry._adapt_kwargs(dummy_rem, "set_reminder", {"reminder": "stretch", "when": "in 1 minute"})
+    assert adapted_rem == {"text": "stretch", "when": "in 1 minute"}
+
+    def dummy_win(title_keyword: str = ""): pass
+    adapted_win = registry._adapt_kwargs(dummy_win, "focus_window", {"name": "Brave"})
+    assert adapted_win == {"title_keyword": "Brave"}
+
+
+# ── Full screen routing and screen OCR pattern exclusions ───────────────
+def test_full_screen_routing(monkeypatch):
+    execute = AsyncMock(return_value={"result": "ok"})
+    monkeypatch.setattr(registry, "execute", execute)
+    result = asyncio.run(ToolRouter().try_fast_path("make brave full screen"))
+    assert result is not None
+    assert execute.await_args_list[0].args[0] == "focus_application"
+    assert execute.await_args_list[1].args[0] == "keyboard_hotkey"
+    assert execute.await_args_list[1].kwargs == {"hotkey": "f11"}
+
+
+def test_youtube_video_intent_routing(monkeypatch):
+    execute = AsyncMock(return_value={"result": "ok"})
+    monkeypatch.setattr(registry, "execute", execute)
+    result = asyncio.run(ToolRouter().try_fast_path("open some valorant videos"))
+    assert result is not None
+    assert execute.await_args_list[0].args[0] == "play_youtube_video"
+    assert execute.await_args_list[0].kwargs["query"] == "valorant videos"
+
+
+def test_screen_ocr_pattern_excludes_fullscreen_and_brightness():
+    from jarvis.core.pipeline import SCREEN_CAPTURE_PAT
+    assert SCREEN_CAPTURE_PAT.search("make brave full screen") is None
+    assert SCREEN_CAPTURE_PAT.search("turn down screen brightness") is None
+    assert SCREEN_CAPTURE_PAT.search("lock screen") is None
+    assert SCREEN_CAPTURE_PAT.search("what is on my screen right now") is not None
+
