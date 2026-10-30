@@ -210,6 +210,58 @@ def _bring_to_front(hwnd) -> bool:
         return False
 
 
+def _get_foreground_hwnd():
+    """Return the current foreground window handle, or None."""
+    try:
+        import ctypes
+        return ctypes.windll.user32.GetForegroundWindow()
+    except Exception:
+        return None
+
+
+def _reclaim_focus_in_background(prev_hwnd, app_query: str,
+                                 attempts: int = 8, interval: float = 0.35) -> None:
+    """
+    After launching an app that grabs the foreground, hand focus back to the
+    window the user was on. Only reclaims *from the app we just launched* — if
+    the user intentionally switched to something else, we leave them alone.
+
+    Best-effort: a brief flicker is possible because Windows' foreground-lock
+    lets a launching app steal focus before we can restore it.
+    """
+    import time
+    if not prev_hwnd:
+        return
+    try:
+        import ctypes
+        import win32gui
+        user32 = ctypes.windll.user32
+        for _ in range(attempts):
+            time.sleep(interval)
+            cur = user32.GetForegroundWindow()
+            if cur == prev_hwnd:
+                continue
+            win = find_app_window(app_query)
+            # Reclaim only if the freshly launched app is what holds focus.
+            if win and cur == win[0]:
+                if win32gui.IsWindow(prev_hwnd) and win32gui.IsWindowVisible(prev_hwnd):
+                    _bring_to_front(prev_hwnd)
+    except Exception as e:
+        logger.debug(f"reclaim focus notice: {e}")
+
+
+def _launch_background(prev_hwnd, app_query: str) -> None:
+    """Spawn a daemon thread that keeps the user's window in focus after launch."""
+    if not prev_hwnd:
+        return
+    import threading
+    threading.Thread(
+        target=_reclaim_focus_in_background,
+        args=(prev_hwnd, app_query),
+        daemon=True,
+    ).start()
+
+
 def decide_focus_message(label: str, found: bool, is_foreground: bool) -> str:
     """
     Pure focus-decision logic (unit-testable, no win32):
@@ -392,8 +444,12 @@ class DynamicAppResolver:
 
         return None
 
-    def launch(self, query: str, force_new: bool = False) -> str:
-        """Find best application match, focusing existing window or launching if not running."""
+    def launch(self, query: str, force_new: bool = False, background: bool = True) -> str:
+        """Find best application match, focusing existing window or launching if not running.
+
+        background=True (default) keeps the user's current window in focus after a
+        fresh launch; set it False to let the new app come to the foreground.
+        """
         clean_q = query.lower().strip()
         from jarvis.core.rules_engine import rules_engine
 
@@ -434,23 +490,32 @@ class DynamicAppResolver:
             return f"I could not find an application matching '{query}' installed on your PC, Sir."
 
         score, name, target, source = match
+        # Remember the window the user is on so we can hand focus back after launch.
+        prev_hwnd = _get_foreground_hwnd() if background else None
+        suffix = " in the background" if background else ""
         try:
             if source == "protocol":
                 if target.startswith("cmd /c"):
                     subprocess.Popen(target, shell=True)
                 else:
                     subprocess.Popen(target)
-                return f"Opening {name.title()}, Sir."
+                if background:
+                    _launch_background(prev_hwnd, clean_q)
+                return f"Opening {name.title()}{suffix}, Sir."
             elif source == "shortcut" and target.endswith(".lnk"):
                 os.startfile(target)
-                return f"Opening {name}, Sir."
+                if background:
+                    _launch_background(prev_hwnd, clean_q)
+                return f"Opening {name}{suffix}, Sir."
             else:
                 # Executable path
                 if Path(target).exists():
                     os.startfile(target)
                 else:
                     subprocess.Popen(f'"{target}"', shell=True)
-                return f"Opening {name}, Sir."
+                if background:
+                    _launch_background(prev_hwnd, clean_q)
+                return f"Opening {name}{suffix}, Sir."
         except Exception as e:
             logger.error(f"Error launching {name} ({target}): {e}")
             return f"Failed to open {name}: {e}"
@@ -460,11 +525,11 @@ class DynamicAppResolver:
 app_resolver = DynamicAppResolver()
 
 
-@register_tool(name="launch_application", description="Launch an application dynamically by name or bring active window to front if already open.", category="process")
-def launch_application(app_name: str, force_new: bool = False) -> str:
+@register_tool(name="launch_application", description="Launch an application by name WITHOUT stealing focus (stays in the background by default). Set background=False only if the user explicitly wants the app brought to the front.", category="process")
+def launch_application(app_name: str, force_new: bool = False, background: bool = True) -> str:
     """Dynamically focus existing application window or launch if not running."""
     clean = app_name.lower().strip()
-    return app_resolver.launch(clean, force_new=force_new)
+    return app_resolver.launch(clean, force_new=force_new, background=background)
 
 
 @register_tool(name="kill_process", description="Terminate a running application or process by name (e.g. chrome, brave, blender, vs code, vscode).", category="process")

@@ -24,6 +24,11 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 
 from jarvis.tools.registry import registry, ToolParameter, register_tool
+from jarvis.core.env import load_env_file
+
+# Ensure .env secrets (e.g. TAVILY_API_KEY) are in os.environ before we spawn
+# MCP servers — they inherit os.environ via the launcher below.
+load_env_file()
 
 CONFIG_PATH = Path("config/mcp_servers.json")
 _PROTOCOL_VERSION = "2024-11-05"

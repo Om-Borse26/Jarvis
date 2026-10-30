@@ -8,6 +8,11 @@ from pathlib import Path
 from functools import lru_cache
 from dataclasses import dataclass, field
 
+from jarvis.core.env import load_env_file
+
+# Load repo-root .env (secrets) before any config consumer reads the environment.
+load_env_file()
+
 CONFIG_PATH = Path(__file__).parent.parent.parent / "config" / "settings.toml"
 
 

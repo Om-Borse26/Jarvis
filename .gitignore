@@ -26,6 +26,8 @@ data/
 
 # Config with secrets
 config/settings.local.toml
+# Secrets — API keys live here, never in git
+.env
 # Runtime-generated config (user-specific, not source)
 config/permissions.json
 config/tools_registry.json

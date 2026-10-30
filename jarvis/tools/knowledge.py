@@ -39,6 +39,8 @@ def looks_private(question: str) -> bool:
 
 def _tavily_answer(question: str) -> str:
     """Return a concise cloud answer, or '' if unavailable."""
+    from jarvis.core.env import load_env_file
+    load_env_file()
     api_key = os.environ.get("TAVILY_API_KEY", "").strip()
     if not api_key:
         return ""
