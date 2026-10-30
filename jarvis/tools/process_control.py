@@ -21,6 +21,40 @@ from loguru import logger
 from jarvis.tools.registry import register_tool
 
 
+# Window title search terms per spoken app name (shared by the finder/focus helpers).
+WINDOW_ALIAS_MAP = {
+    "vscode": ["visual studio code", " - code"],
+    "vs code": ["visual studio code", " - code"],
+    "code": ["visual studio code", " - code"],
+    "vscod": ["visual studio code", " - code"],
+    "viscode": ["visual studio code", " - code"],
+    "brave": ["brave"],
+    "chrome": ["google chrome", "chrome"],
+    "edge": ["microsoft edge", "edge"],
+    "notepad": ["notepad"],
+    "blender": ["blender"],
+    "discord": ["discord"],
+    "whatsapp": ["whatsapp"],
+    "spotify": ["spotify"],
+    "explorer": ["file explorer", "this pc", "documents", "downloads"],
+    "terminal": ["powershell", "windows terminal", "cmd"],
+}
+
+# Pretty spoken labels per app.
+_APP_LABELS = {
+    "vscode": "VS Code", "vs code": "VS Code", "code": "VS Code",
+    "brave": "Brave", "chrome": "Chrome", "edge": "Edge",
+    "notepad": "Notepad", "blender": "Blender", "discord": "Discord",
+    "whatsapp": "WhatsApp", "spotify": "Spotify", "explorer": "File Explorer",
+    "terminal": "the terminal",
+}
+
+
+def _app_label(app_query: str) -> str:
+    q = (app_query or "").lower().strip()
+    return _APP_LABELS.get(q, (app_query or "").strip().title() or "that app")
+
+
 def focus_existing_window(app_query: str) -> Optional[str]:
     """
     Check if an application window is already running and bring it to the foreground.
@@ -38,24 +72,7 @@ def focus_existing_window(app_query: str) -> Optional[str]:
             user32.SetThreadDesktop(hdesk)
 
         q = app_query.lower().strip()
-        alias_map = {
-            "vscode": ["visual studio code", " - code"],
-            "vs code": ["visual studio code", " - code"],
-            "code": ["visual studio code", " - code"],
-            "vscod": ["visual studio code", " - code"],
-            "viscode": ["visual studio code", " - code"],
-            "brave": ["brave"],
-            "chrome": ["google chrome", "chrome"],
-            "edge": ["microsoft edge", "edge"],
-            "notepad": ["notepad"],
-            "blender": ["blender"],
-            "discord": ["discord"],
-            "whatsapp": ["whatsapp"],
-            "spotify": ["spotify"],
-            "explorer": ["file explorer", "this pc", "documents", "downloads"],
-            "terminal": ["powershell", "windows terminal", "cmd"],
-        }
-        search_terms = alias_map.get(q, [q])
+        search_terms = WINDOW_ALIAS_MAP.get(q, [q])
 
         matched_hwnds = []
 
@@ -118,6 +135,111 @@ def focus_existing_window(app_query: str) -> Optional[str]:
     except Exception as e:
         logger.debug(f"Window focus notice: {e}")
     return None
+
+
+def find_app_window(app_query: str):
+    """
+    Return (hwnd, title, is_foreground) for a matching visible window, or None.
+    Unlike focus_existing_window, this NEVER changes focus — it only inspects.
+    """
+    try:
+        import ctypes
+        import win32gui
+
+        user32 = ctypes.windll.user32
+        q = (app_query or "").lower().strip()
+        terms = WINDOW_ALIAS_MAP.get(q, [q])
+        matches: List[Tuple[int, str]] = []
+
+        def _cb(hwnd, _):
+            if win32gui.IsWindowVisible(hwnd):
+                title = win32gui.GetWindowText(hwnd).strip()
+                tl = title.lower()
+                for term in terms:
+                    if term in ("visual studio code", " - code") and "antigravity" in tl:
+                        continue
+                    if term and term in tl:
+                        matches.append((hwnd, title))
+                        break
+            return True
+
+        try:
+            win32gui.EnumWindows(_cb, None)
+        except Exception:
+            pass
+        if not matches:
+            return None
+        hwnd, title = matches[0]
+        try:
+            is_fg = bool(user32.GetForegroundWindow() == hwnd)
+        except Exception:
+            is_fg = False
+        return hwnd, title, is_fg
+    except Exception as e:
+        logger.debug(f"find_app_window notice: {e}")
+        return None
+
+
+def is_app_open(app_query: str) -> bool:
+    """True if a visible window for the app exists. Does NOT change focus."""
+    return find_app_window(app_query) is not None
+
+
+def _bring_to_front(hwnd) -> bool:
+    """Force a window to the foreground using the AttachThreadInput dance."""
+    try:
+        import ctypes
+        import win32con
+
+        user32 = ctypes.windll.user32
+        cur_fg = user32.GetForegroundWindow()
+        cur_thread = user32.GetWindowThreadProcessId(cur_fg, None)
+        my_thread = ctypes.windll.kernel32.GetCurrentThreadId()
+        try:
+            user32.AttachThreadInput(cur_thread, my_thread, True)
+            user32.ShowWindow(hwnd, win32con.SW_RESTORE)
+            user32.SetForegroundWindow(hwnd)
+            user32.AttachThreadInput(cur_thread, my_thread, False)
+        except Exception:
+            import win32gui
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            win32gui.SetForegroundWindow(hwnd)
+        return True
+    except Exception as e:
+        logger.debug(f"bring_to_front notice: {e}")
+        return False
+
+
+def decide_focus_message(label: str, found: bool, is_foreground: bool) -> str:
+    """
+    Pure focus-decision logic (unit-testable, no win32):
+      - not open      -> "<label> isn't open, Sir."
+      - already front -> "You're already on <label>, Sir."
+      - otherwise     -> "Switched to <label>, Sir."
+    """
+    if not found:
+        return f"{label} isn't open, Sir."
+    if is_foreground:
+        return f"You're already on {label}, Sir."
+    return f"Switched to {label}, Sir."
+
+
+@register_tool(
+    name="focus_application",
+    description="Bring an already-open application to the front (focus/switch/show). Reports if it isn't open or is already focused; NEVER launches a new instance. Use for 'switch to X', 'focus on X', 'show me X'.",
+    category="process",
+)
+def focus_application(app_name: str) -> str:
+    """Focus/switch to an open app with smart rules (not open / already focused / switch)."""
+    label = _app_label(app_name)
+    win = find_app_window(app_name)
+    if not win:
+        return decide_focus_message(label, found=False, is_foreground=False)
+    hwnd, _title, is_fg = win
+    if is_fg:
+        return decide_focus_message(label, found=True, is_foreground=True)
+    _bring_to_front(hwnd)
+    return decide_focus_message(label, found=True, is_foreground=False)
 
 
 class DynamicAppResolver:
@@ -276,10 +398,11 @@ class DynamicAppResolver:
 
         # Step 1: Check if an open window already exists and reuse it!
         if not force_new and not any(kw in clean_q for kw in ["new window", "another instance", "new tab", "duplicate"]):
-            existing_title = focus_existing_window(clean_q)
-            if existing_title:
-                logger.info(f"🔄 Reusing active window '{existing_title}' instead of spawning duplicate.")
-                return f"Switched to your open {clean_q} window, Sir."
+            win = find_app_window(clean_q)
+            if win:
+                logger.info(f"🔄 '{win[1]}' already open — leaving it in the background (no focus steal).")
+                label = _app_label(clean_q)
+                return f"{label} is already open, Sir. Say 'switch to {label}' to bring it up."
 
             # Check if process is already running in background (e.g. still initializing window)
             from jarvis.core.rules_engine import rules_engine
@@ -299,12 +422,12 @@ class DynamicAppResolver:
 
             if proc_running:
                 import time
+                label = _app_label(clean_q)
                 for _ in range(5):
                     time.sleep(0.5)
-                    existing_title = focus_existing_window(clean_q)
-                    if existing_title:
-                        return f"Switched to your open {clean_q} window, Sir."
-                return f"{clean_q} is already running in the background, Sir."
+                    if is_app_open(clean_q):
+                        return f"{label} is already open, Sir. Say 'switch to {label}' to bring it up."
+                return f"{label} is already running in the background, Sir."
 
         match = self.resolve(query)
         if not match:

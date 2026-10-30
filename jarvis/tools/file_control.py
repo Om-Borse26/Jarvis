@@ -229,20 +229,18 @@ def create_directory(path: str, in_vscode: bool = False) -> str:
     if not clean_p:
         return "Please specify a folder name or path to create."
     try:
-        from jarvis.tools.process_control import focus_existing_window
+        from jarvis.tools.process_control import is_app_open
 
         if in_vscode:
-            from jarvis.tools.process_control import focus_existing_window
             import psutil
 
-            # Check if VS Code process or window is active
-            vscode_title = focus_existing_window("vscode")
+            # Check if VS Code window is open (does NOT steal focus)
+            vscode_open = is_app_open("vscode")
             active_ws = get_active_vscode_workspace()
 
-            if vscode_title and active_ws and active_ws.exists():
+            if vscode_open and active_ws and active_ws.exists():
                 target = active_ws / clean_p
                 target.mkdir(parents=True, exist_ok=True)
-                focus_existing_window("vscode")
                 return f"Created folder '{clean_p}' inside your active VS Code workspace ({active_ws.name}), Sir."
 
             # Create on Desktop
@@ -257,15 +255,13 @@ def create_directory(path: str, in_vscode: bool = False) -> str:
                 for p in psutil.process_iter(['name'])
             )
 
-            if vscode_title or is_running:
-                # Reuse existing window with -r
+            if vscode_open or is_running:
+                # Reuse existing window with -r (background; no forced focus)
                 subprocess.Popen(f'code -r "{resolved_path}"', shell=True)
-                focus_existing_window("vscode")
-                return f"Created folder '{clean_p}' on your Desktop and opened it in your active VS Code window, Sir."
+                return f"Created folder '{clean_p}' on your Desktop and opened it in your VS Code window, Sir."
             else:
                 # Use -r so we never spawn a duplicate window if one is already open.
                 subprocess.Popen(f'code -r "{resolved_path}"', shell=True)
-                focus_existing_window("vscode")
                 return f"Created folder '{clean_p}' on your Desktop and launched VS Code with it, Sir."
 
         target = Path(clean_p)

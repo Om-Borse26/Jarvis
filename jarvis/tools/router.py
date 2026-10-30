@@ -366,6 +366,28 @@ class ToolRouter:
                     res = await registry.execute("search_web", query=query)
                     return res.get("result", f"Searching web for {query}, Sir.")
 
+        # ── Focus / Switch to an already-open app ─────────────────────────
+        # "switch to brave", "focus on vs code", "show me brave", "jarvis focus brave",
+        # "bring up vs code", "go to brave". NEVER launches a new instance.
+        focus_match = re.search(
+            r"^(?:jarvis\s+)?(?:switch(?:\s+back)?\s+to|focus(?:\s+on)?|show\s+me|bring\s+up|go\s+to|jump\s+to)\s+(?:the\s+)?([a-zA-Z0-9_\-\.\s]+?)(?:\s+window|\s+please|\s+for\s+me|\s+again)?$",
+            clean_cmd
+        )
+        if not focus_match and clean_cmd in ("focus", "jarvis focus"):
+            # Bare "focus" with no target — ask which app rather than guessing.
+            return "Which application should I switch to, Sir?"
+        if focus_match:
+            app_target = focus_match.group(1).strip().lower()
+            app_target = re.sub(r"\b(?:v\.s\.|v\.\s*s\.|v\s+s)\s*code\b", "vscode", app_target)
+            FOCUS_DISALLOWED = [
+                "video", "channel", "whatsapp", "chat", "message", "website", "url",
+                "file", "folder", "directory", "youtube", "google", "mail", "email",
+                "screen", "tab", "mcp", "dashboard", "music", "song", "track", "next", "previous",
+            ]
+            if app_target and not any(dk in app_target for dk in FOCUS_DISALLOWED):
+                res = await registry.execute("focus_application", app_name=app_target)
+                return res.get("result", f"Switching to {app_target}, Sir.")
+
         # ── Process Launching & Killing ───────────────────────────────────
         # Matches "then you open vs code for me", "can you open blender", "open brave", "launch vscode", "start notepad"
         launch_match = re.search(
