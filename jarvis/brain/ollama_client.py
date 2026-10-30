@@ -200,7 +200,7 @@ class OllamaClient:
             resp = await asyncio.wait_for(self._client.chat(
                 model      = model,
                 messages   = messages,
-                tools      = tools,
+                tools      = tools or None,
                 stream     = False,
                 keep_alive = "24h",
                 options    = {
@@ -221,10 +221,10 @@ class OllamaClient:
         if cancel_event and cancel_event.is_set():
             return {"content": "", "tool_calls": []}
 
-        return self._normalize_tool_response(resp)
+        return self._normalize_tool_response(resp, parse_text_calls=bool(tools))
 
     @staticmethod
-    def _normalize_tool_response(resp) -> dict:
+    def _normalize_tool_response(resp, parse_text_calls: bool = True) -> dict:
         """Flatten Ollama's response (pydantic object or dict) into a plain decision dict."""
         if isinstance(resp, dict):
             msg = resp.get("message", {}) or {}
@@ -257,6 +257,9 @@ class OllamaClient:
         # Strip stray reasoning tags the model may leak into content.
         if content:
             content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+
+        if not parse_text_calls:
+            return {"content": content, "tool_calls": []}
 
         if not tool_calls and content:
             candidate = content.strip()

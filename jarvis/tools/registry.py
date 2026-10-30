@@ -227,14 +227,28 @@ class ToolRegistry:
                 base = inner
         return cls._JSON_TYPE_MAP.get(base, "string")
 
-    def get_tools_schema(self, categories: Optional[list[str]] = None) -> list[dict]:
+    def get_tools_schema(
+        self,
+        categories: Optional[list[str]] = None,
+        include_external: Optional[bool] = None,
+    ) -> list[dict]:
         """
-        Return all registered tools in native Ollama/OpenAI function-calling format.
-        This is what gets passed to the model's `tools=` parameter.
+        Return registered tools in native Ollama/OpenAI function-calling format.
+
+        External MCP tools (category "mcp:<server>") are opt-in: only included when
+        include_external is True, or when the scoped categories contain "mcp".
+        Tools with "unsafe" in their name are never offered to the model.
         """
+        if include_external is None:
+            include_external = bool(categories and "mcp" in categories)
         schemas: list[dict] = []
         for t in self._tools.values():
-            if categories and t.category not in categories:
+            is_external = t.category.startswith("mcp:")
+            if "unsafe" in t.name.lower():
+                continue
+            if is_external and not include_external:
+                continue
+            if categories and not is_external and t.category not in categories:
                 continue
             properties: dict[str, Any] = {}
             required: list[str] = []

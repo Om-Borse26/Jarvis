@@ -179,7 +179,12 @@ class AgentLoop:
     until the task is complete or MAX_ITERATIONS is reached.
     """
 
-    MAX_ITERATIONS = 15
+    MAX_ITERATIONS = 6
+    MAX_SAME_TOOL = 2          # same tool more than this many times = stuck
+    MAX_CONSECUTIVE_ERRORS = 2
+
+    # Words that mean the user asked for more than one thing.
+    _MULTI_STEP = re.compile(r"\b(and|then|after that|afterwards|also|followed by)\b", re.I)
 
     def __init__(self, llm_client, speak_fn: Optional[Callable] = None):
         """
@@ -202,6 +207,7 @@ class AgentLoop:
         system_prompt: Optional[str] = None,
         seed_tool_call: Optional[dict] = None,
         seed_tool_calls: Optional[list] = None,
+        tools: Optional[list] = None,
     ) -> str:
         """
         Execute a user request through the iterative ReAct loop using native
@@ -220,7 +226,8 @@ class AgentLoop:
         self._cancel_event.clear()
         self._focus_approved = False   # Reset the per-task focus-loss approval.
         observations: List[Observation] = []
-        tools = registry.get_tools_schema()
+        if tools is None:
+            tools = registry.get_tools_schema()
 
         base_system = system_prompt or AGENT_SYSTEM_PROMPT.format(
             user_name=user_name,
@@ -240,6 +247,14 @@ class AgentLoop:
 
         pending_calls = list(seed_tool_calls or ([seed_tool_call] if seed_tool_call else []))
 
+        # A weak model rarely says "done", so for single-intent requests we finish
+        # as soon as one tool succeeds instead of asking the model again.
+        single_intent = not self._MULTI_STEP.search(user_request or "")
+        tool_counts: Dict[str, int] = {}
+        consecutive_errors = 0
+        last_result = ""
+        results: List[str] = []
+
         for iteration in range(1, self.MAX_ITERATIONS + 1):
             if self._cancel_event.is_set():
                 logger.info("Agent loop cancelled by user.")
@@ -252,7 +267,7 @@ class AgentLoop:
             else:
                 decision = await self.llm.chat_with_tools(
                     messages=messages,
-                    tools=registry.get_tools_schema(),
+                    tools=tools,
                     cancel_event=self._cancel_event,
                 )
                 content = decision["content"]
@@ -282,6 +297,15 @@ class AgentLoop:
             if not tool_name:
                 return re.sub(r"[*#_`~]", "", content or "I've completed the requested action.").strip()
 
+            if registry.get_tool(tool_name) is None:
+                logger.warning(f"🚫 Model requested unknown tool '{tool_name}'. Stopping.")
+                return last_result or "I don't have a way to do that yet, Sir."
+
+            tool_counts[tool_name] = tool_counts.get(tool_name, 0) + 1
+            if tool_counts[tool_name] > self.MAX_SAME_TOOL:
+                logger.warning(f"🔁 '{tool_name}' repeated {tool_counts[tool_name]}x. Stopping.")
+                return last_result or "I couldn't get that done, Sir."
+
             from jarvis.security.audit import redact
             safe_args = redact(tool_args)
             logger.info(f"🔧 Agent step {iteration}/{self.MAX_ITERATIONS}: {tool_name}({safe_args})")
@@ -310,15 +334,18 @@ class AgentLoop:
 
             try:
                 exec_result = await registry.execute(tool_name, **tool_args)
-                if exec_result.get("status") == "success":
+                succeeded = exec_result.get("status") == "success"
+                if succeeded:
                     result_text = exec_result.get("result", "Done.")
                 else:
                     result_text = exec_result.get("message", "The tool reported an error.")
             except Exception as e:
+                succeeded = False
                 result_text = f"Error: {e}"
                 logger.error(f"Tool {tool_name} failed: {e}")
 
             result_text = str(result_text)
+            consecutive_errors = 0 if succeeded else consecutive_errors + 1
 
             # ── 4. Record observation + feed result back to the model ────
             observations.append(Observation(
@@ -348,14 +375,20 @@ class AgentLoop:
                 "tool_name": tool_name,
             })
 
+            if succeeded:
+                last_result = result_text[:400]
+                if last_result not in results:
+                    results.append(last_result)
+                if single_intent and not pending_calls:
+                    logger.success(f"✅ Single-intent task done via '{tool_name}'.")
+                    return " ".join(results[-3:])
+            elif consecutive_errors >= self.MAX_CONSECUTIVE_ERRORS:
+                logger.warning(f"❌ {consecutive_errors} consecutive tool failures. Stopping.")
+                return f"I couldn't get that done, Sir. {result_text[:160]}"
+
         # ── Max iterations reached ────────────────────────────────────────
         logger.warning(f"Agent loop hit MAX_ITERATIONS ({self.MAX_ITERATIONS})")
-        summary_parts = [f"Step {o.step}: {o.tool_name} → {o.result[:50]}" for o in observations[-5:]]
-        summary = "\n".join(summary_parts)
-        return (
-            f"I've completed {len(observations)} steps toward your request. "
-            f"Here's what I accomplished:\n{summary}"
-        )
+        return last_result or "I couldn't finish that, Sir. Could you break it into smaller steps?"
 
     def cancel(self):
         """Cancel the running agent loop (e.g., on barge-in)."""

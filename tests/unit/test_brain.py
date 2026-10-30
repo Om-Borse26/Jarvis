@@ -69,7 +69,10 @@ def test_agent_executes_all_seeded_calls_and_observes_results(monkeypatch):
     from unittest.mock import AsyncMock
     from jarvis.core.agent_loop import AgentLoop, registry
 
-    execute = AsyncMock(return_value={"status": "success", "result": "Verified result"})
+    execute = AsyncMock(side_effect=[
+        {"status": "success", "result": "Opening your dashboard."},
+        {"status": "success", "result": "Servers: playwright."},
+    ])
     monkeypatch.setattr(registry, "execute", execute)
     llm = SimpleNamespace(chat_with_tools=AsyncMock(return_value={
         "content": "Both tasks are complete.", "tool_calls": []
@@ -78,10 +81,10 @@ def test_agent_executes_all_seeded_calls_and_observes_results(monkeypatch):
         {"name": "open_dashboard", "arguments": {}},
         {"name": "list_mcp_servers", "arguments": {}},
     ]))
-    assert result == "Both tasks are complete."
     assert [call.args[0] for call in execute.await_args_list] == ["open_dashboard", "list_mcp_servers"]
-    messages = llm.chat_with_tools.call_args.kwargs["messages"]
-    assert len([message for message in messages if message["role"] == "tool"]) == 2
+    # Both results are reported, without an extra round-trip to the model.
+    assert result == "Opening your dashboard. Servers: playwright."
+    llm.chat_with_tools.assert_not_awaited()
 
 
 def test_text_call_reaches_agent_execution(monkeypatch):

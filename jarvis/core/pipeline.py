@@ -33,7 +33,7 @@ from jarvis.brain.ollama_client import OllamaClient
 from jarvis.core.arbiter  import SteerArbiter
 from jarvis.core.config   import load_config
 from jarvis.core.clarify  import missing_slot_question
-from jarvis.core.intent_scope import scope_categories
+from jarvis.core.intent_scope import select_tools
 from jarvis.core.memory   import memory_manager
 from jarvis.tools.screen_tool import ScreenTool
 from jarvis.audio.speaker_id import speaker_id
@@ -508,13 +508,10 @@ class JarvisPipeline:
                 messages.extend(history)
             messages.append({"role": "user", "content": user_msg})
 
-            # Scope the tool schema to the relevant categories so the weak
-            # local model gets a short, focused toolset (faster + more accurate).
-            # scope_categories returns None when ambiguous → full toolset.
-            scoped = scope_categories(text)
-            tools = registry.get_tools_schema(scoped)
-            if scoped:
-                logger.debug(f"🎯 Tool scope: {scoped} ({len(tools)} tools)")
+            # Small talk / plain questions get no tools; commands get a scoped
+            # toolset (external MCP tools only when explicitly in scope).
+            tools, scoped = select_tools(text)
+            logger.debug(f"🎯 Tool scope: {scoped or ('none' if not tools else 'core')} ({len(tools)} tools)")
             decision = await self.llm.chat_with_tools(
                 messages     = messages,
                 tools        = tools,
@@ -524,7 +521,7 @@ class JarvisPipeline:
             final_response = ""
             if self._cancel_llm.is_set():
                 final_response = ""
-            elif decision["tool_calls"]:
+            elif decision["tool_calls"] and tools:
                 # ── Action / multi-step path via the agent loop ──────────
                 logger.info(f"🤖 Tool workflow via AgentLoop for: '{text}'")
                 final_response = await self.agent_loop.run(
@@ -536,6 +533,7 @@ class JarvisPipeline:
                     conversation_history = self._conversation_history,
                     system_prompt        = system_prompt,
                     seed_tool_calls      = decision["tool_calls"],
+                    tools                = tools,
                 )
                 if final_response and not self._cancel_llm.is_set():
                     logger.info(f"🤖 Jarvis: {final_response}")
@@ -543,6 +541,8 @@ class JarvisPipeline:
             else:
                 # ── Conversational path — speak the response ─────────────
                 final_response = re.sub(r"[*#_`~]", "", decision["content"] or "").strip()
+                if not final_response:
+                    final_response = "Sorry, I didn't quite get that, Sir."
                 if final_response and not self._cancel_llm.is_set():
                     for sentence in re.split(r"(?<=[.!?])\s+", final_response):
                         if self._cancel_llm.is_set():

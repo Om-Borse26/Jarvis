@@ -5,24 +5,28 @@ Jarvis's state and expands on demand. Runs as its own process (pywebview needs
 the main thread):  python -m jarvis.ui.island
 
 Design notes:
-  • The window is clipped to a rounded-rectangle REGION (CreateRoundRectRgn), so
-    there is no square/background even though WebView2 can't do true transparency
-    — the visible pill is simply an opaque dark rounded shape (like Apple's).
-  • Default z-order is NOT always-on-top and non-activating, so it sits on the
-    desktop and gets covered when you focus apps. Voice ("come forward") raises it.
-  • The web layer calls back into Python (window.pywebview.api.*) to resize/move
-    the native window and change z-order as it morphs between modes.
+  • The window is clipped to a rounded-rectangle REGION, so there is no square
+    background even though WebView2 can't do true transparency.
+  • Default z-order is the bottom of the stack (sits on the desktop, covered by
+    apps). Voice ("come forward") or hovering raises it.
+  • Freeze-safety: pywebview exposes every PUBLIC attribute of the js_api object
+    to JavaScript, and runs each bridge call on its own thread. So IslandApi has
+    NO public attributes, and its methods only enqueue a request and return
+    immediately. A single worker thread applies geometry/z-order with raw Win32
+    calls (SWP_ASYNCWINDOWPOS posts to the UI thread instead of blocking it).
 """
 from __future__ import annotations
 
+import queue
 import sys
 import threading
-import time
 
 from loguru import logger
 
-# (width, height, corner-radius) per mode.
-_MODES = {
+_TITLE = "Jarvis Island"
+
+# (width, height, corner-radius) per mode, in logical (96-DPI) pixels.
+MODES = {
     "collapsed": (380, 54, 27),
     "mini":      (470, 300, 24),
     "tools":     (470, 400, 24),
@@ -39,82 +43,116 @@ def _ui_port() -> int:
         return 8787
 
 
-class IslandApi:
-    """Native bridge exposed to the web layer as window.pywebview.api."""
+def compute_geometry(mode: str, screen_w: int, screen_h: int, scale: float = 1.0):
+    """Pure: physical (x, y, w, h, radius) for a mode, centered horizontally."""
+    w, h, r = MODES.get(mode, MODES["collapsed"])
+    w, h, r = int(w * scale), int(h * scale), int(r * scale)
+    w, h = min(w, screen_w), min(h, screen_h)
+    x = max(0, (screen_w - w) // 2)
+    if mode == "dashboard":
+        y = max(0, (screen_h - h) // 3)
+    else:
+        y = int(_TOP_MARGIN * scale)
+    return x, y, w, h, r
+
+
+class _NativeWorker:
+    """Applies window geometry / z-order off the UI and bridge threads."""
 
     def __init__(self) -> None:
-        self.window = None
-        self._screen_w = 1920
-        self._screen_h = 1080
+        self._q: "queue.Queue[tuple]" = queue.Queue()
+        threading.Thread(target=self._run, name="island-native", daemon=True).start()
 
-    # ── geometry ─────────────────────────────────────────────────────────
-    def set_mode(self, mode: str) -> None:
-        """Resize+recenter the native window for a UI mode and round its corners."""
-        w, h, r = _MODES.get(mode, _MODES["collapsed"])
-        try:
-            x = max(0, (self._screen_w - w) // 2)
-            y = _TOP_MARGIN if mode != "dashboard" else max(0, (self._screen_h - h) // 3)
-            if self.window:
-                self.window.resize(w, h)
-                self.window.move(x, y)
-            self._apply_region(w, h, r)
-        except Exception as e:
-            logger.debug(f"[Island] set_mode notice: {e}")
+    def submit(self, kind: str, value: str) -> None:
+        self._q.put((kind, value))
 
-    def _hwnd(self):
+    def _run(self) -> None:
+        while True:
+            kind, value = self._q.get()
+            # Coalesce bursts (hover in/out) so only the latest request is applied.
+            latest = {kind: value}
+            try:
+                while True:
+                    k, v = self._q.get_nowait()
+                    latest[k] = v
+            except queue.Empty:
+                pass
+            try:
+                if "mode" in latest:
+                    self._apply_mode(latest["mode"])
+                if "z" in latest:
+                    self._apply_z(latest["z"])
+            except Exception as e:
+                logger.debug(f"[Island] native notice: {e}")
+
+    @staticmethod
+    def _hwnd():
+        import win32gui
+        return win32gui.FindWindow(None, _TITLE) or None
+
+    @staticmethod
+    def _scale(hwnd) -> float:
         try:
-            return int(self.window.native.Handle.ToInt64())
+            import ctypes
+            dpi = ctypes.windll.user32.GetDpiForWindow(hwnd)
+            return (dpi or 96) / 96.0
         except Exception:
-            return None
+            return 1.0
 
-    def _apply_region(self, w: int, h: int, r: int) -> None:
-        try:
-            import win32gui
-            hwnd = self._hwnd()
-            if not hwnd:
-                return
-            region = win32gui.CreateRoundRectRgn(0, 0, w + 1, h + 1, r * 2, r * 2)
-            win32gui.SetWindowRgn(hwnd, region, True)
-        except Exception as e:
-            logger.debug(f"[Island] region notice: {e}")
+    def _apply_mode(self, mode: str) -> None:
+        import win32api, win32con, win32gui
+        hwnd = self._hwnd()
+        if not hwnd:
+            return
+        sw = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
+        sh = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
+        x, y, w, h, r = compute_geometry(mode, sw, sh, self._scale(hwnd))
+        flags = win32con.SWP_NOACTIVATE | win32con.SWP_NOZORDER | 0x4000  # SWP_ASYNCWINDOWPOS
+        win32gui.SetWindowPos(hwnd, 0, x, y, w, h, flags)
+        region = win32gui.CreateRoundRectRgn(0, 0, w + 1, h + 1, r * 2, r * 2)
+        win32gui.SetWindowRgn(hwnd, region, True)
 
-    # ── z-order ──────────────────────────────────────────────────────────
-    def come_forward(self) -> None:
-        """Raise above other windows (topmost), without stealing keyboard focus."""
+    def _apply_z(self, where: str) -> None:
+        import win32con, win32gui
+        hwnd = self._hwnd()
+        if not hwnd:
+            return
+        flags = win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE | 0x4000
+        if where == "front":
+            win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0, flags)
+        else:
+            win32gui.SetWindowPos(hwnd, win32con.HWND_NOTOPMOST, 0, 0, 0, 0, flags)
+            win32gui.SetWindowPos(hwnd, win32con.HWND_BOTTOM, 0, 0, 0, 0, flags)
+
+    def hide_from_taskbar(self) -> None:
         try:
-            import win32gui, win32con
+            import win32con, win32gui
             hwnd = self._hwnd()
             if hwnd:
-                win32gui.SetWindowPos(
-                    hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
-                    win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE,
-                )
+                ex = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+                win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, ex | win32con.WS_EX_TOOLWINDOW)
         except Exception as e:
-            logger.debug(f"[Island] come_forward notice: {e}")
-
-    def send_back(self) -> None:
-        """Drop back to the desktop layer (not topmost)."""
-        try:
-            import win32gui, win32con
-            hwnd = self._hwnd()
-            if hwnd:
-                win32gui.SetWindowPos(
-                    hwnd, win32con.HWND_NOTOPMOST, 0, 0, 0, 0,
-                    win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE,
-                )
-        except Exception as e:
-            logger.debug(f"[Island] send_back notice: {e}")
+            logger.debug(f"[Island] taskbar notice: {e}")
 
 
-def _make_unobtrusive(hwnd) -> None:
-    """No taskbar button, never steals focus on click (widget-like)."""
-    try:
-        import win32gui, win32con
-        ex = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
-        ex |= win32con.WS_EX_NOACTIVATE | win32con.WS_EX_TOOLWINDOW
-        win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, ex)
-    except Exception:
-        pass
+class IslandApi:
+    """JS bridge (window.pywebview.api). No public attributes — see module notes."""
+
+    def __init__(self, worker: _NativeWorker) -> None:
+        self._worker = worker
+
+    def set_mode(self, mode: str) -> bool:
+        if mode in MODES:
+            self._worker.submit("mode", mode)
+        return True
+
+    def come_forward(self) -> bool:
+        self._worker.submit("z", "front")
+        return True
+
+    def send_back(self) -> bool:
+        self._worker.submit("z", "back")
+        return True
 
 
 def run() -> None:
@@ -125,40 +163,35 @@ def run() -> None:
         return
 
     port = _ui_port()
-    api = IslandApi()
+    worker = _NativeWorker()
+    api = IslandApi(worker)
+
+    w, h, _ = MODES["collapsed"]
     try:
         screen = webview.screens[0] if getattr(webview, "screens", None) else None
-        if screen:
-            api._screen_w, api._screen_h = screen.width, screen.height
+        screen_w = screen.width if screen else 1920
     except Exception:
-        screen = None
+        screen_w = 1920
 
-    w, h, r = _MODES["collapsed"]
     window = webview.create_window(
-        "Jarvis Island",
+        _TITLE,
         url=f"http://127.0.0.1:{port}/island",
         width=w,
         height=h,
-        x=max(0, (api._screen_w - w) // 2),
+        x=max(0, (screen_w - w) // 2),
         y=_TOP_MARGIN,
         frameless=True,
-        easy_drag=False,          # dragging handled by the pill's own grab zone
-        on_top=False,             # sits on the desktop by default
+        easy_drag=False,
+        on_top=False,
         resizable=False,
         background_color="#05070d",
         js_api=api,
     )
-    api.window = window
 
     def _on_loaded():
-        try:
-            hwnd = api._hwnd()
-            if hwnd:
-                _make_unobtrusive(hwnd)
-            api._apply_region(w, h, r)
-            api.send_back()
-        except Exception as e:
-            logger.debug(f"[Island] init notice: {e}")
+        worker.hide_from_taskbar()
+        worker.submit("mode", "collapsed")
+        worker.submit("z", "back")
 
     window.events.loaded += _on_loaded
     webview.start(gui="edgechromium" if sys.platform == "win32" else None)

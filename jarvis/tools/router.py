@@ -305,7 +305,12 @@ class ToolRouter:
                 res = await registry.execute("search_youtube", query=search_target, force_new=force_new, new_tab=is_new_tab)
                 return res.get("result", f"Opening {search_target} on YouTube, Sir.")
 
-        if text in ("open youtube", "open youtube in brave", "launch youtube", "go to youtube"):
+        yt_cmd = re.sub(r"^(?:jarvis[, ]*)?(?:can you |could you |would you |please )?", "", text)
+        if re.fullmatch(
+            r"(?:open|launch|start|go to|bring up|pull up)\s+(?:up\s+)?(?:the\s+)?youtube(?:\.com)?"
+            r"(?:\s+(?:in|on)\s+(?:brave|the browser|my browser))?(?:\s+(?:for me|please|now))?",
+            yt_cmd,
+        ):
             res = await registry.execute("open_website", url="https://www.youtube.com", force_new=force_new, new_tab=is_new_tab)
             return "Opening YouTube, Sir."
 
