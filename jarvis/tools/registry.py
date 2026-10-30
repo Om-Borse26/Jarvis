@@ -44,6 +44,7 @@ class ToolRegistry:
     """Central registry and execution engine for all Jarvis tools."""
 
     _instance: Optional[ToolRegistry] = None
+    _tools: dict[str, ToolDefinition] = {}
 
     def __new__(cls) -> ToolRegistry:
         if cls._instance is None:

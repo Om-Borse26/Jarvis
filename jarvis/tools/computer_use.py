@@ -78,7 +78,7 @@ def screenshot(region: str = "") -> str:
         if region and "," in region:
             parts = [int(x.strip()) for x in region.split(",")]
             if len(parts) == 4:
-                img = pyautogui.screenshot(region=tuple(parts))
+                img = pyautogui.screenshot(region=(parts[0], parts[1], parts[2], parts[3]))
             else:
                 img = pyautogui.screenshot()
         else:
@@ -109,7 +109,7 @@ def ocr_screen() -> str:
 
         # Try Windows native OCR first (fastest)
         try:
-            import winocr
+            import winocr  # type: ignore
             import asyncio
             result = asyncio.run(winocr.recognize_pil(img, "en"))
             if result and result.text:
@@ -120,7 +120,7 @@ def ocr_screen() -> str:
 
         # Fallback to pytesseract
         try:
-            import pytesseract
+            import pytesseract  # type: ignore
             text = pytesseract.image_to_string(img)
             lines = [line.strip() for line in text.split("\n") if line.strip()]
             return f"Screen text ({len(lines)} lines):\n" + "\n".join(lines[:50])
@@ -191,11 +191,12 @@ def _detect_text_elements(img) -> list[dict]:
             import easyocr
             _EASYOCR_READER = easyocr.Reader(["en"], gpu=False)
         for bbox, text, conf in _EASYOCR_READER.readtext(np.array(img)):
-            if text.strip() and conf > 0.4:
-                xs = [p[0] for p in bbox]
-                ys = [p[1] for p in bbox]
+            t_str = str(text).strip()
+            if t_str and float(conf) > 0.4:
+                xs = [float(p[0]) for p in bbox]
+                ys = [float(p[1]) for p in bbox]
                 x, y = min(xs), min(ys)
-                elements.append(_mk(text, x, y, max(xs) - x, max(ys) - y, sx, sy))
+                elements.append(_mk(t_str, int(x), int(y), int(max(xs) - x), int(max(ys) - y), sx, sy))
         if elements:
             return elements
     except Exception:
@@ -415,6 +416,7 @@ def keyboard_type(text: str, interval: float = 0.02) -> str:
     except Exception as e:
         # Fallback for non-ASCII text
         try:
+            import pyautogui
             import pyperclip
             pyperclip.copy(text)
             pyautogui.hotkey("ctrl", "v")

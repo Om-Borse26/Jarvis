@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import threading
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
@@ -35,7 +36,8 @@ def acquire_single_instance() -> bool:
         import win32event
         import win32api
         import winerror
-        _mutex_handle = win32event.CreateMutex(None, False, _MUTEX_NAME)
+        _w32e: Any = win32event
+        _mutex_handle = _w32e.CreateMutex(None, False, _MUTEX_NAME)
         if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
             return False
         return True

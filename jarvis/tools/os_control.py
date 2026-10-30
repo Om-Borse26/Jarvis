@@ -18,12 +18,19 @@ from jarvis.tools.registry import register_tool
 pyautogui.FAILSAFE = False
 
 
+def _get_speakers():
+    import pycaw.pycaw as pycaw
+    spk = pycaw.AudioUtilities.GetSpeakers()
+    if spk is None:
+        raise RuntimeError("No audio output device found.")
+    return spk
+
+
 @register_tool(name="set_volume", description="Set master system audio volume to a percentage (0 to 100).", category="audio")
 def set_volume(percent: int) -> str:
     """Set master system audio volume to a percentage (0 to 100)."""
     try:
-        import pycaw.pycaw as pycaw
-        spk = pycaw.AudioUtilities.GetSpeakers()
+        spk = _get_speakers()
         level = max(0.0, min(1.0, float(percent) / 100.0))
         spk.EndpointVolume.SetMasterVolumeLevelScalar(level, None)
         return f"Master volume set to {percent} percent."
@@ -36,8 +43,7 @@ def set_volume(percent: int) -> str:
 def mute_volume() -> str:
     """Mute the master system audio."""
     try:
-        import pycaw.pycaw as pycaw
-        spk = pycaw.AudioUtilities.GetSpeakers()
+        spk = _get_speakers()
         spk.EndpointVolume.SetMute(1, None)
         return "Audio muted."
     except Exception as e:
@@ -48,8 +54,7 @@ def mute_volume() -> str:
 def unmute_volume() -> str:
     """Unmute the master system audio."""
     try:
-        import pycaw.pycaw as pycaw
-        spk = pycaw.AudioUtilities.GetSpeakers()
+        spk = _get_speakers()
         spk.EndpointVolume.SetMute(0, None)
         return "Audio unmuted."
     except Exception as e:
@@ -60,8 +65,7 @@ def unmute_volume() -> str:
 def get_volume() -> str:
     """Check current master audio volume and mute status."""
     try:
-        import pycaw.pycaw as pycaw
-        spk = pycaw.AudioUtilities.GetSpeakers()
+        spk = _get_speakers()
         vol = round(spk.EndpointVolume.GetMasterVolumeLevelScalar() * 100)
         is_muted = bool(spk.EndpointVolume.GetMute())
         status = "muted" if is_muted else f"{vol} percent"
@@ -116,8 +120,7 @@ def show_desktop() -> str:
 def change_volume_relative(delta_percent: int = 10) -> str:
     """Increase or decrease volume relative to current level."""
     try:
-        import pycaw.pycaw as pycaw
-        spk = pycaw.AudioUtilities.GetSpeakers()
+        spk = _get_speakers()
         cur_scalar = spk.EndpointVolume.GetMasterVolumeLevelScalar()
         new_scalar = max(0.0, min(1.0, cur_scalar + (float(delta_percent) / 100.0)))
         spk.EndpointVolume.SetMasterVolumeLevelScalar(new_scalar, None)
@@ -132,7 +135,7 @@ def change_volume_relative(delta_percent: int = 10) -> str:
 @register_tool(name="set_brightness", description="Set the laptop screen brightness to a percentage (0 to 100).", category="system")
 def set_brightness(percent: int) -> str:
     """Set the display brightness (0-100) via WMI."""
-    level = max(0, min(100, int(percent)))
+    level = max(0, min(100, percent))
     try:
         subprocess.run(
             ["powershell", "-NoProfile", "-Command",
@@ -192,7 +195,9 @@ def change_brightness_relative(delta_percent: int = 10) -> str:
 def get_current_active_window() -> str:
     """Get active window title and process name."""
     try:
-        import win32gui, win32process, psutil
+        import psutil
+        import win32gui
+        import win32process
         hwnd = win32gui.GetForegroundWindow()
         if hwnd:
             title = win32gui.GetWindowText(hwnd)

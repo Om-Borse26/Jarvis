@@ -18,7 +18,7 @@ import base64
 import sqlite3
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from loguru import logger
 
@@ -68,7 +68,7 @@ class SecretsVault:
         self.db_path = Path(db_path) if db_path else _resolve_vault_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._backend = "dpapi" if _HAS_DPAPI else ("fernet" if _HAS_FERNET else "none")
-        self._fernet = self._init_fernet() if self._backend == "fernet" else None
+        self._fernet: Any = self._init_fernet() if self._backend == "fernet" else None
         self._init_db()
         logger.info(f"[Vault] Ready (backend={self._backend}, store={self.db_path}).")
 
@@ -104,38 +104,45 @@ class SecretsVault:
         con.commit()
         con.close()
 
-    def _init_fernet(self):
+    def _init_fernet(self) -> Any:
+        if not _HAS_FERNET or Fernet is None:
+            return None
+        _fernet_cls: Any = Fernet
         key = None
-        if _HAS_KEYRING:
+        if _HAS_KEYRING and keyring is not None:
+            _kr: Any = keyring
             try:
-                key = keyring.get_password(_KEYRING_SERVICE, _KEYRING_USER)
+                key = _kr.get_password(_KEYRING_SERVICE, _KEYRING_USER)
             except Exception as e:
                 logger.warning(f"[Vault] Keyring read notice: {e}")
         if not key:
-            key = Fernet.generate_key().decode()
-            if _HAS_KEYRING:
+            key = _fernet_cls.generate_key().decode()
+            if _HAS_KEYRING and keyring is not None:
+                _kr = keyring
                 try:
-                    keyring.set_password(_KEYRING_SERVICE, _KEYRING_USER, key)
+                    _kr.set_password(_KEYRING_SERVICE, _KEYRING_USER, key)
                 except Exception as e:
                     logger.warning(f"[Vault] Keyring write notice: {e}")
-        return Fernet(key.encode() if isinstance(key, str) else key)
+        return _fernet_cls(key.encode() if isinstance(key, str) else key)
 
     # ── Encryption primitives ────────────────────────────────────────────────
     def _encrypt(self, plaintext: str) -> str:
         data = plaintext.encode("utf-8")
-        if self._backend == "dpapi":
-            blob = win32crypt.CryptProtectData(data, "jarvis-secret", None, None, None, 0)
+        if self._backend == "dpapi" and _HAS_DPAPI and win32crypt is not None:
+            _wc: Any = win32crypt
+            blob = _wc.CryptProtectData(data, "jarvis-secret", None, None, None, 0)
             return base64.b64encode(blob).decode("ascii")
-        if self._backend == "fernet":
+        if self._backend == "fernet" and self._fernet is not None:
             return base64.b64encode(self._fernet.encrypt(data)).decode("ascii")
         raise RuntimeError("No encryption backend available to store secrets safely.")
 
     def _decrypt(self, blob_b64: str, backend: str) -> str:
         raw = base64.b64decode(blob_b64.encode("ascii"))
         if backend == "dpapi":
-            if not _HAS_DPAPI:
+            if not _HAS_DPAPI or win32crypt is None:
                 raise RuntimeError("Secret was stored with DPAPI but DPAPI is unavailable.")
-            _desc, data = win32crypt.CryptUnprotectData(raw, None, None, None, 0)
+            _wc: Any = win32crypt
+            _desc, data = _wc.CryptUnprotectData(raw, None, None, None, 0)
             return data.decode("utf-8")
         if backend == "fernet":
             if not self._fernet:

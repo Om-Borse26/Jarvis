@@ -357,7 +357,7 @@ def delete_directory(path: str, force: bool = False) -> str:
     try:
         # Try to send to recycle bin first (safe delete)
         try:
-            from send2trash import send2trash
+            from send2trash import send2trash  # type: ignore
             send2trash(str(target.resolve()))
             return f"Moved folder '{target.name}' to recycle bin, Sir."
         except ImportError:

@@ -209,7 +209,7 @@ class TTSEngine:
     def _synthesize_and_play(self, text: str):
         """Synthesize one chunk and play it to the speaker."""
         clean = clean_text_for_speech(text)
-        if not clean:
+        if not clean or self._tts is None:
             return
 
         t0 = time.perf_counter()

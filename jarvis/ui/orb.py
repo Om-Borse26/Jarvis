@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 
+from typing import Any
 from loguru import logger
 
 _WIDTH = 240
@@ -86,14 +87,19 @@ def run() -> None:
         background_color="#0a0e1a",
     )
 
-    def _position():
+    if window is None:
+        return
+
+    def _position(*args: Any, **kwargs: Any) -> None:
         try:
-            if screen:
+            if screen and window:
                 window.move(screen.width - _WIDTH - 30, screen.height - _HEIGHT - 80)
+            import ctypes
             import win32gui
-            hwnd = int(window.native.Handle.ToInt64())
+            win: Any = window
+            hwnd = int(win.native.Handle.ToInt64())
             left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-            region = win32gui.CreateEllipticRgn(0, 0, right - left, bottom - top)
+            region = ctypes.windll.gdi32.CreateEllipticRgn(0, 0, right - left, bottom - top)
             win32gui.SetWindowRgn(hwnd, region, True)
         except Exception:
             pass

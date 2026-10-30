@@ -10,7 +10,7 @@ import io
 import queue
 import threading
 import time
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 import sounddevice as sd
@@ -64,7 +64,7 @@ class VADListener:
 
         self._running        = False
         self._thread: Optional[threading.Thread] = None
-        self._model          = None
+        self._model: Any = None
         self._model_state    = None
         self._last_speaker_active_time = 0.0
 
@@ -87,7 +87,7 @@ class VADListener:
         self._model, utils = torch.hub.load(
             repo_or_dir="snakers4/silero-vad",
             model="silero_vad",
-            trust_repo=True,
+            trust_repo=True,  # type: ignore
             verbose=False,
         )
         self._model.eval()

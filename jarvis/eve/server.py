@@ -22,6 +22,7 @@ import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse, parse_qs
 
 from loguru import logger
@@ -59,7 +60,7 @@ TOKEN = _load_or_create_token()
 
 
 class _Handler(BaseHTTPRequestHandler):
-    def log_message(self, *a):
+    def log_message(self, format: str, *args: Any) -> None:
         return
 
     def _json(self, obj, code=200):

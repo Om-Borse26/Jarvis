@@ -14,7 +14,7 @@ from __future__ import annotations
 import sqlite3
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from loguru import logger
 
@@ -40,7 +40,7 @@ class SemanticMemory:
     def __init__(self, db_path: str | Path = "data/memory/semantic.db") -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._model = None
+        self._model: Any = None
         self._tried_model = False
         self._init_db()
         logger.debug("[Memory] Semantic memory (L4) ready.")
@@ -137,18 +137,21 @@ class SemanticMemory:
     def _vector_recall(self, query: str, k: int) -> List[str]:
         try:
             self._ensure_embeddings()
+            if np is None or self._model is None:
+                return []
             con = sqlite3.connect(self.db_path)
             rows = con.execute("SELECT text, embedding FROM memories WHERE embedding IS NOT NULL").fetchall()
             con.close()
             if not rows:
                 return []
+            _np: Any = np
             texts = [r[0] for r in rows]
-            matrix = np.frombuffer(b"".join(r[1] for r in rows), dtype="float32")
+            matrix = _np.frombuffer(b"".join(r[1] for r in rows), dtype="float32")
             dim = matrix.size // len(rows)
             matrix = matrix.reshape(len(rows), dim)
             qvec = self._model.encode([query], normalize_embeddings=True)[0].astype("float32")
             scores = matrix @ qvec  # cosine (vectors are normalized)
-            top = np.argsort(-scores)[:k]
+            top = _np.argsort(-scores)[:k]
             return [texts[i] for i in top if scores[i] > 0.25]
         except Exception as e:
             logger.debug(f"[Memory] Vector recall failed: {e}")

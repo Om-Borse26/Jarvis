@@ -287,7 +287,7 @@ class Scheduler:
         con.commit()
         jid = cur.lastrowid
         con.close()
-        return jid
+        return int(jid or 0)
 
     def list_jobs(self) -> List[Dict[str, Any]]:
         con = sqlite3.connect(self.db_path)

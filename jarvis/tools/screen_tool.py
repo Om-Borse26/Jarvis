@@ -53,12 +53,13 @@ class ScreenTool:
 
         # 1. High-speed native Windows Media OCR
         try:
-            import winrt.windows.media.ocr as ocr
-            import winrt.windows.graphics.imaging as imaging
-            import winrt.windows.storage as storage
+            import winrt.windows.media.ocr as ocr  # type: ignore
+            import winrt.windows.graphics.imaging as imaging  # type: ignore
+            import winrt.windows.storage as storage  # type: ignore
 
-            file = await storage.StorageFile.get_file_from_path_async(str(target))
-            stream = await file.open_async(storage.FileAccessMode.READ)
+            st: Any = storage
+            file = await st.StorageFile.get_file_from_path_async(str(target))
+            stream = await file.open_async(st.FileAccessMode.READ)
             decoder = await imaging.BitmapDecoder.create_async(stream)
             bitmap = await decoder.get_software_bitmap_async()
             engine = ocr.OcrEngine.try_create_from_user_profile_languages()

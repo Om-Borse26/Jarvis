@@ -52,7 +52,7 @@ def _read_audit_tail(limit: int = 50) -> list[dict]:
 
 
 class _Handler(BaseHTTPRequestHandler):
-    def log_message(self, *args):  # silence default request logging
+    def log_message(self, format: str, *args: Any) -> None:  # silence default request logging
         return
 
     # ── helpers ───────────────────────────────────────────────────────────────

@@ -20,7 +20,7 @@ from loguru import logger
 from jarvis.tools.registry import register_tool, registry
 
 try:
-    import pypdf
+    import pypdf  # type: ignore
 except ImportError:
     pypdf = None
 
