@@ -99,6 +99,7 @@ class TTSEngine:
         self._tts         = None
         self._voice       = self._cfg.get("voice", "bm_george")
         self._speed       = float(self._cfg.get("speed", 1.15))
+        self.speed_mult   = 1.0   # Runtime multiplier (mood-driven; 1.0 = config speed)
         self._model_path  = self._cfg["model_path"]
 
         cfg_audio         = load_config()["audio"]
@@ -215,7 +216,7 @@ class TTSEngine:
         samples, sample_rate = self._tts.create(
             clean,
             voice=self._voice,
-            speed=self._speed,
+            speed=self._speed * max(0.5, min(1.5, self.speed_mult)),
             lang="en-us",
         )
         t_synth = (time.perf_counter() - t0) * 1000

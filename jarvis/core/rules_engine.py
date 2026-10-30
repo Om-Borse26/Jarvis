@@ -305,6 +305,20 @@ class RulesEngine:
             return any(d in cmd for d in danger_words)
         return False
 
+    # Tools that pull a (usually different) window to the foreground and thus
+    # interrupt whatever the user is doing. Explicit user-initiated focus
+    # (focus_application) is intentionally NOT here — the user asked for it.
+    FOCUS_STEALING_TOOLS = {
+        "focus_window", "keyboard_type", "keyboard_hotkey", "keyboard_press",
+        "mouse_click", "mouse_move", "click_text", "type_text",
+    }
+
+    def steals_focus(self, tool_name: str, args: Optional[Dict[str, Any]] = None) -> bool:
+        """True if running this tool will likely take foreground focus from the user."""
+        if tool_name == "launch_application":
+            return bool((args or {}).get("force_new"))
+        return tool_name in self.FOCUS_STEALING_TOOLS
+
     def get_app_shortcut(self, app: str, action: str) -> Optional[List[str]]:
         """Get keyboard shortcut for a specific action in a specific app."""
         app_lower = app.lower().strip()

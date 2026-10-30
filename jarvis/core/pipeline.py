@@ -32,8 +32,9 @@ from jarvis.audio.mood    import MoodEngine
 from jarvis.brain.ollama_client import OllamaClient
 from jarvis.core.arbiter  import SteerArbiter
 from jarvis.core.config   import load_config
-from jarvis.core.memory   import memory_manager
-from jarvis.tools.screen_tool import ScreenTool
+from jarvis.core.clarify  import missing_slot_question
+from jarvis.core.intent_scope import scope_categories
+from jarvis.core.memory   import memory_managerfrom jarvis.tools.screen_tool import ScreenTool
 from jarvis.audio.speaker_id import speaker_id
 import jarvis.tools  # Automatically registers all tools & plugins
 from jarvis.tools.registry import registry
@@ -443,8 +444,24 @@ class JarvisPipeline:
                 screen_ctx = await self._handle_screen_request()
                 text = f"{text}\n\n{screen_ctx}"
 
+            # ── 1b. Deterministic slot clarification ─────────────────────
+            # Ask instantly for a missing required value instead of letting the
+            # weak model hallucinate one. Only fires on clearly-incomplete commands.
+            clarify_q = missing_slot_question(text)
+            if clarify_q:
+                logger.info(f"❓ Missing slot → clarifying: {clarify_q}")
+                await self._speak_async(clarify_q)
+                self._arm_listening()
+                self._conversation_history.extend([
+                    {"role": "user",      "content": text},
+                    {"role": "assistant", "content": clarify_q},
+                ])
+                return
+
             # ── 2. Mood analysis (zero-latency background update) ─────────
             mood_state = self.mood.current_mood
+            # Apply the mood's delivery pace to the TTS engine for this turn.
+            self.tts.speed_mult = mood_state.tts_speed
             asyncio.create_task(asyncio.to_thread(self.mood.analyze, audio))
 
             # ── 3. Build prompt (steer-aware + tools schema) ──────────────
@@ -490,14 +507,19 @@ class JarvisPipeline:
                 messages.extend(history)
             messages.append({"role": "user", "content": user_msg})
 
-            tools = registry.get_tools_schema()
+            # Scope the tool schema to the relevant categories so the weak
+            # local model gets a short, focused toolset (faster + more accurate).
+            # scope_categories returns None when ambiguous → full toolset.
+            scoped = scope_categories(text)
+            tools = registry.get_tools_schema(scoped)
+            if scoped:
+                logger.debug(f"🎯 Tool scope: {scoped} ({len(tools)} tools)")
             decision = await self.llm.chat_with_tools(
                 messages     = messages,
                 tools        = tools,
                 cancel_event = self._cancel_llm,
-            )
-
-            final_response = ""
+                temperature  = mood_state.temperature,
+            )            final_response = ""
             if self._cancel_llm.is_set():
                 final_response = ""
             elif decision["tool_calls"]:

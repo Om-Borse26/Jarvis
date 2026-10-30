@@ -218,6 +218,7 @@ class AgentLoop:
             The final spoken response text.
         """
         self._cancel_event.clear()
+        self._focus_approved = False   # Reset the per-task focus-loss approval.
         observations: List[Observation] = []
         tools = registry.get_tools_schema()
 
@@ -291,6 +292,17 @@ class AgentLoop:
                 if not approved:
                     logger.info(f"🛑 User declined '{tool_name}'. Aborting task.")
                     return "Understood, I won't proceed with that."
+
+            # Focus-loss gate: ask once per task before an action that would
+            # steal foreground focus from whatever the user is doing.
+            if not self._focus_approved and rules_engine.steals_focus(tool_name, tool_args):
+                approved = await consent_manager.request(
+                    "This will switch away from your current window"
+                )
+                if not approved:
+                    logger.info(f"🛑 User declined focus change for '{tool_name}'.")
+                    return "Understood, I'll leave your current window in focus."
+                self._focus_approved = True
 
             # Speak a brief progress cue for genuinely multi-step tasks.
             if iteration >= 2 and self.speak_fn and iteration <= 5:

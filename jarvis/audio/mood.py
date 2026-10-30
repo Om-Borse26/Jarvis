@@ -23,6 +23,7 @@ class MoodState:
     tone_guidance:  str    = "Be crisp and direct."
     tts_speed:      float  = 1.0     # TTS speed multiplier
     response_length: str   = "normal" # "short" | "normal" | "detailed"
+    temperature:    float  = 0.4     # LLM sampling temperature
 
 
 # Tone guidance per mood — injected into LLM system prompt
@@ -67,6 +68,17 @@ MOOD_RESPONSE_LENGTH = {
     "tired":     "short",
     "energized": "normal",
     "neutral":   "normal",
+}
+
+# LLM sampling temperature per mood — crisp/low when focused or stressed,
+# a touch warmer when relaxed. Keeps action selection deterministic.
+MOOD_TEMPERATURE = {
+    "focused":   0.25,
+    "relaxed":   0.55,
+    "stressed":  0.30,
+    "tired":     0.35,
+    "energized": 0.45,
+    "neutral":   0.40,
 }
 
 
@@ -148,6 +160,7 @@ class MoodEngine:
                 tone_guidance  = MOOD_TONES[mood],
                 tts_speed      = MOOD_TTS_SPEED[mood],
                 response_length= MOOD_RESPONSE_LENGTH[mood],
+                temperature    = MOOD_TEMPERATURE[mood],
             )
             logger.debug(
                 f"Mood: {mood} | pitch={avg['pitch_mean']:.0f}Hz "
