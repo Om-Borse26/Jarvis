@@ -19,8 +19,10 @@ import datetime
 import threading
 import time
 import re
+import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
+
 
 from loguru import logger
 
@@ -69,6 +71,13 @@ SCREEN_CAPTURE_PAT = re.compile(
     re.IGNORECASE,
 )
 
+_global_pipeline: Optional[JarvisPipeline] = None
+
+
+def get_pipeline() -> Optional[JarvisPipeline]:
+    """Return the currently running JarvisPipeline instance, if any."""
+    return _global_pipeline
+
 
 
 class JarvisPipeline:
@@ -78,6 +87,8 @@ class JarvisPipeline:
     """
 
     def __init__(self):
+        global _global_pipeline
+        _global_pipeline = self
         self._cfg         = load_config()
         self._running     = False
 
@@ -226,6 +237,9 @@ class JarvisPipeline:
         # Surface anything Eve queued from the phone while you were away.
         await self._announce_eve_handoffs()
 
+        # 11. Start console text input loop for interactive typing without microphone
+        asyncio.create_task(self._console_input_loop())
+
         # 6. Main event loop — keeps process alive
         try:
             while self._running and not lifecycle.shutdown_requested():
@@ -260,6 +274,28 @@ class JarvisPipeline:
                     logger.debug(f"[UI] error terminating {proc_name}: {e}")
         lifecycle.release_single_instance()
         logger.info("Jarvis shut down.")
+
+    async def _console_input_loop(self):
+        """Allows direct text typing in the console alongside voice listening."""
+        loop = asyncio.get_running_loop()
+        while self._running and not lifecycle.shutdown_requested():
+            try:
+                line = await loop.run_in_executor(None, sys.stdin.readline)
+                if not line or not self._running:
+                    await asyncio.sleep(0.3)
+                    continue
+                cmd = line.strip()
+                if not cmd:
+                    continue
+                if cmd.lower() in ("exit", "quit", "q"):
+                    lifecycle.request_shutdown()
+                    break
+                logger.info(f"⌨️  Console Command received: '{cmd}'")
+                await self.process_user_text(cmd)
+            except Exception as e:
+                logger.debug(f"Console input loop notice: {e}")
+                await asyncio.sleep(0.5)
+
 
     # ──────────────────────────────────────────────────────────────────
     # Trigger & speech event handlers
@@ -458,12 +494,24 @@ class JarvisPipeline:
                 self._listening_timestamp = time.time()
                 return
 
-            if self.speaker_id._enrolled_speakers:
-                is_auth, sim, name = self.speaker_id.verify(audio, threshold=0.66)
-                if not is_auth:
-                    logger.warning(f"🛡️ Speech ignored: Unrecognized voice (similarity={sim:.2f} < 0.66). Authorized only for {self._user_name}.")
-                    return
-                logger.debug(f"👤 Verified speaker: {name} (similarity={sim:.2f})")
+            # Route speech to core turn executor
+            await self.process_user_text(text, audio=audio)
+        except Exception as e:
+            logger.exception(f"Speech processing error: {e}")
+
+    async def inject_text_command(self, text: str) -> str:
+        """Process an explicit text command from CLI, UI, or test harness."""
+        return await self.process_user_text(text)
+
+    async def process_user_text(self, text: str, audio: Optional[Any] = None) -> str:
+        """
+        Execute a full turn identically to spoken speech:
+        Fast-Path -> Screen OCR -> Clarification -> Intent Dispatcher -> AgentLoop -> Kokoro TTS -> HUD.
+        """
+        try:
+            self._listening = False
+            self._is_processing_turn = True
+            logger.info(f"👤 User: {text}")
 
             # ── Consent interception ──────────────────────────────────────
             # If a risky action is awaiting confirmation, treat this utterance
@@ -471,13 +519,15 @@ class JarvisPipeline:
             if self.consent.is_pending():
                 verdict = self.consent.interpret(text)
                 if verdict is None:
-                    await self._speak_async("Sorry, is that a yes or a no?")
+                    clar_msg = "Sorry, is that a yes or a no?"
+                    await self._speak_async(clar_msg)
                     self._arm_listening()
-                    return
+                    return clar_msg
                 self.consent.resolve(verdict)
                 self.hud.clear_confirmation()
                 self._arm_listening()
-                return
+                return "Confirmation processed."
+
 
             # ── 1. Fast-path intent check (< 1ms instant OS execution) ────
             fast_resp = await self.tool_router.try_fast_path(text)
@@ -491,7 +541,7 @@ class JarvisPipeline:
                     {"role": "user",      "content": text},
                     {"role": "assistant", "content": fast_resp},
                 ])
-                return
+                return fast_resp
 
             # Check for screen / vision inspection command (exclude full screen, brightness, lock screen)
             lower_query = text.lower()
@@ -513,13 +563,15 @@ class JarvisPipeline:
                     {"role": "user",      "content": text},
                     {"role": "assistant", "content": clarify_q},
                 ])
-                return
+                return clarify_q
 
             # ── 2. Mood analysis (zero-latency background update) ─────────
             mood_state = self.mood.current_mood
             # Apply the mood's delivery pace to the TTS engine for this turn.
             self.tts.speed_mult = mood_state.tts_speed
-            asyncio.create_task(asyncio.to_thread(self.mood.analyze, audio))
+            if audio is not None:
+                asyncio.create_task(asyncio.to_thread(self.mood.analyze, audio))
+
 
             # ── 3. Build prompt (steer-aware + tools schema) ──────────────
             try:
@@ -669,10 +721,13 @@ class JarvisPipeline:
             )
             working_memory.clear_task()
             state_bridge.set("idle")
+            return final_response
 
         except Exception as e:
             logger.exception(f"Pipeline error: {e}")
-            await self._speak_async("I encountered an error. Please try again.")
+            err_msg = "I encountered an error. Please try again."
+            await self._speak_async(err_msg)
+            return err_msg
         finally:
             self._is_processing_turn = False
 

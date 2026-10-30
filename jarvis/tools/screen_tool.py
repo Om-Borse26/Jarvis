@@ -27,6 +27,15 @@ class ScreenTool:
 
     def capture_screen(self, show_image: bool = False) -> Path:
         """Capture the full primary display and save to disk. Optionally opens the image."""
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            hdesk = user32.OpenInputDesktop(0, False, 0x0100 | 0x0040)
+            if hdesk:
+                user32.SetThreadDesktop(hdesk)
+        except Exception:
+            pass
+
         screenshot = ImageGrab.grab()
         timestamp = int(time.time() * 1000)
         file_path = self.output_dir / f"screen_{timestamp}.png"

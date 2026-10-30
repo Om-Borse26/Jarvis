@@ -187,6 +187,8 @@ class ToolRegistry:
             "hotkey": ["keys", "shortcut", "key"],
             "keys": ["hotkey", "shortcut", "key"],
             "query": ["search", "search_query", "topic", "q"],
+            "value": ["secret", "token", "password", "key", "val", "content"],
+            "secret": ["value", "token", "password", "key", "val"],
         }
 
         adapted = dict(kwargs)

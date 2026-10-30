@@ -175,6 +175,25 @@ class _Handler(BaseHTTPRequestHandler):
             from jarvis.core.lifecycle import enable_startup, disable_startup
             ok = enable_startup() if body.get("enabled") else disable_startup()
             return self._json({"ok": ok})
+        if r == "/api/chat":
+            text = (body.get("text") or "").strip()
+            if not text:
+                return self._json({"error": "Empty text query"}, 400)
+            from jarvis.core.pipeline import get_pipeline
+            pipeline = get_pipeline()
+            if pipeline and pipeline._running and pipeline._loop:
+                import asyncio
+                fut = asyncio.run_coroutine_threadsafe(
+                    pipeline.process_user_text(text),
+                    pipeline._loop
+                )
+                try:
+                    resp = fut.result(timeout=120)
+                    return self._json({"ok": True, "response": resp})
+                except Exception as e:
+                    logger.error(f"[API] Error in /api/chat: {e}")
+                    return self._json({"error": str(e)}, 500)
+            return self._json({"error": "Jarvis pipeline is not running or ready"}, 503)
         if r == "/api/stop":
             from jarvis.core.lifecycle import request_shutdown
             request_shutdown()

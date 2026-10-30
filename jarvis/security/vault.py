@@ -334,9 +334,10 @@ vault = SecretsVault()
     description="Securely store a credential (API key, token, or password) in the encrypted vault. The value is encrypted at rest and is never spoken or shown. Use when the user says to remember a password, key, or token.",
     category="security",
 )
-def save_secret(name: str, value: str) -> str:
+def save_secret(name: str, value: str = "", secret: str = "", *args, **kwargs) -> str:
     """Encrypt and store a named secret. Returns a masked confirmation only."""
-    ok = vault.set_secret(name, value)
+    val = value or secret
+    ok = vault.set_secret(name, val)
     if ok:
         return f"Stored the credential '{name}' securely in the encrypted vault."
     return f"I was unable to store the credential '{name}'."

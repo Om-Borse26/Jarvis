@@ -20,6 +20,11 @@ pyautogui.FAILSAFE = False
 
 
 def _get_speakers():
+    try:
+        import pythoncom
+        pythoncom.CoInitialize()
+    except Exception:
+        pass
     import pycaw.pycaw as pycaw
     spk = pycaw.AudioUtilities.GetSpeakers()
     if spk is None:

@@ -70,6 +70,15 @@ def screenshot(region: str = "") -> str:
         import pyautogui
         from PIL import Image
 
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            hdesk = user32.OpenInputDesktop(0, False, 0x0100 | 0x0040)
+            if hdesk:
+                user32.SetThreadDesktop(hdesk)
+        except Exception:
+            pass
+
         save_dir = Path("data/screenshots")
         save_dir.mkdir(parents=True, exist_ok=True)
         ts = int(time.time() * 1000)
