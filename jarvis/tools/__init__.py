@@ -23,6 +23,7 @@ from jarvis.tools import browser_tool
 from jarvis.tools import whatsapp_control
 from jarvis.tools import knowledge  # web Q&A (Tavily cloud answer + fact memory)
 from jarvis.tools import procedures  # named multi-step routines/recipes
+from jarvis.tools import cdp_browser  # dedicated CDP-controlled browser
 
 # ── Tier 2: Computer Use tools ───────────────────────────────────────────────
 from jarvis.tools import computer_use

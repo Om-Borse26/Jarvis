@@ -131,6 +131,11 @@ default             = "brave"
 brave_path          = 'C:\Users\ombor\AppData\Local\BraveSoftware\Brave-Browser\Application\brave.exe'
 chrome_path         = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
 # Add more browsers here. Jarvis uses 'default' unless you say otherwise.
+# Jarvis's own dedicated CDP-controlled browser (separate profile from your main
+# Brave, because Chromium 136+ blocks remote debugging on the default profile).
+cdp_browser         = "auto"               # auto | brave | chrome
+cdp_port            = 9222
+cdp_profile         = "data/browser_profile"
 
 [mood]
 enabled             = true
