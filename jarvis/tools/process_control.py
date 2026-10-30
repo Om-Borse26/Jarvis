@@ -31,7 +31,7 @@ WINDOW_ALIAS_MAP = {
     "brave": ["brave"],
     "chrome": ["google chrome", "chrome"],
     "edge": ["microsoft edge", "edge"],
-    "notepad": ["notepad"],
+    "notepad": ["notepad", "untitled"],
     "blender": ["blender"],
     "discord": ["discord"],
     "whatsapp": ["whatsapp"],
@@ -67,7 +67,7 @@ def focus_existing_window(app_query: str) -> Optional[str]:
 
         user32 = ctypes.windll.user32
         # Ensure thread is attached to the interactive user desktop
-        hdesk = user32.OpenInputDesktop(0, False, 0x0100 | 0x0040)
+        hdesk = user32.OpenInputDesktop(0, False, 0x0100 | 0x0040 | 0x0001 | 0x0002)
         if hdesk:
             user32.SetThreadDesktop(hdesk)
 
@@ -138,7 +138,7 @@ def find_app_window(app_query: str):
         import win32gui
 
         user32 = ctypes.windll.user32
-        hdesk = user32.OpenInputDesktop(0, False, 0x0100 | 0x0040)
+        hdesk = user32.OpenInputDesktop(0, False, 0x0100 | 0x0040 | 0x0001 | 0x0002)
         if hdesk:
             user32.SetThreadDesktop(hdesk)
 
