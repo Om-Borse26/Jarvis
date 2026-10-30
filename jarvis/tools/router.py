@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import json
+import datetime
 from typing import Optional, Tuple
 from loguru import logger
 from jarvis.tools.registry import registry
@@ -491,6 +492,17 @@ class ToolRouter:
         if text in ("list mcp servers", "show mcp servers", "what mcps are installed", "what mcp servers are there"):
             res = await registry.execute("list_mcp_servers")
             return res.get("result")
+
+        # ── Time & Date fast-path ─────────────────────────────────────────
+        if re.search(r"\b(?:what(?:'s|\s+is)\s+the\s+time|what\s+time\s+is\s+it|tell\s+me\s+the\s+time|current\s+time)\b", text):
+            now = datetime.datetime.now()
+            time_str = now.strftime("%I:%M %p").lstrip("0")
+            return f"It is currently {time_str}, Sir."
+
+        if re.search(r"\b(?:what(?:'s|\s+is)\s+(?:the\s+)?date(?:\s+today)?|today(?:'s)?\s+date|what\s+day\s+is\s+it)\b", text):
+            now = datetime.datetime.now()
+            date_str = now.strftime("%A, %B %d, %Y")
+            return f"Today is {date_str}, Sir."
 
         # ── Open-web knowledge Q&A (cloud answer, not the local model) ────
         # Runs LAST so every PC/self/specific handler above wins first. Only

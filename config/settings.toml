@@ -48,7 +48,7 @@ device          = "cpu"        # kokoro runs well on CPU; frees GPU for LLM
 # ── Model routing (tuned for 6 GB VRAM — one model resident at a time) ──
 # Only ~one model fits in 6 GB, so the everyday path stays on the small, fast
 # 4B model (no reloads); heavier models load on demand for code/deep/long tasks.
-fast_model      = "qwen3.5:4b"                 # Routing + everyday + tool calls (3.4 GB, resident, fast TTFT)
+fast_model      = "qwen2.5-coder:7b"           # Routing + everyday + tool calls (4.7 GB, rock-solid native tool-calling)
 code_model      = "qwen2.5-coder:7b"           # Coding, scripting, MCP generation (4.7 GB)
 deep_model      = "qwen3.5-32k:latest"         # Deep reasoning + screen-text analysis (3.4 GB, 32K ctx)
 long_ctx_model  = "qwen2.5-coder-32k:latest"   # Very large code/doc contexts > 8K tokens (4.7 GB, 32K ctx)

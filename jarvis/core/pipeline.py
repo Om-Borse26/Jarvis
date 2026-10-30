@@ -34,7 +34,8 @@ from jarvis.core.arbiter  import SteerArbiter
 from jarvis.core.config   import load_config
 from jarvis.core.clarify  import missing_slot_question
 from jarvis.core.intent_scope import scope_categories
-from jarvis.core.memory   import memory_managerfrom jarvis.tools.screen_tool import ScreenTool
+from jarvis.core.memory   import memory_manager
+from jarvis.tools.screen_tool import ScreenTool
 from jarvis.audio.speaker_id import speaker_id
 import jarvis.tools  # Automatically registers all tools & plugins
 from jarvis.tools.registry import registry
@@ -519,7 +520,8 @@ class JarvisPipeline:
                 tools        = tools,
                 cancel_event = self._cancel_llm,
                 temperature  = mood_state.temperature,
-            )            final_response = ""
+            )
+            final_response = ""
             if self._cancel_llm.is_set():
                 final_response = ""
             elif decision["tool_calls"]:
