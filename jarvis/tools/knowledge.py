@@ -54,18 +54,43 @@ def _tavily_answer(question: str) -> str:
             json={
                 "api_key": api_key,
                 "query": question,
-                "include_answer": True,
-                "max_results": 3,
+                "include_answer": "basic",
+                "max_results": 5,
                 "search_depth": "basic",
             },
             timeout=10,
         )
         resp.raise_for_status()
         data = resp.json()
-        return (data.get("answer") or "").strip()
+        return _concise(data.get("answer") or "")
     except Exception as e:
         logger.warning(f"Tavily answer notice: {e}")
         return ""
+
+
+def _concise(answer: str, max_chars: int = 240) -> str:
+    """Trim a web answer to a clean, speakable form (drop source-citation fluff)."""
+    a = re.sub(r"\s+", " ", (answer or "").strip())
+    if not a:
+        return ""
+    a = re.sub(r'"[^"]*"', "", a)                       # drop quoted snippets
+    a = re.sub(r",?\s*(?:as (?:stated|mentioned|noted)|according to|per|based on)\b.*?(?=[.?!]|$)",
+               "", a, flags=re.I)                        # drop "...as stated in X" clauses
+    a = re.sub(r"\bthe other source[s]?\b.*", "", a, flags=re.I)
+    a = re.sub(r"\s+", " ", a).strip(" :;,.-")
+    sentences = re.split(r"(?<=[.!?])\s+", a)
+    kept = []
+    for s in sentences:
+        low = s.lower()
+        if any(w in low for w in ("source", "quora", "reddit", "does not provide")):
+            continue
+        kept.append(s)
+        if sum(len(x) for x in kept) >= max_chars:
+            break
+    out = (" ".join(kept).strip() or (sentences[0] if sentences else a)).strip()
+    if out and out[-1] not in ".!?":
+        out += "."
+    return out[:max_chars].strip()
 
 
 @register_tool(

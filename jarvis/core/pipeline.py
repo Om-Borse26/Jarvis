@@ -30,6 +30,7 @@ from jarvis.audio.stt     import STTEngine
 from jarvis.audio.tts     import TTSEngine
 from jarvis.audio.mood    import MoodEngine
 from jarvis.brain.ollama_client import OllamaClient
+from jarvis.brain.llm_provider import make_llm_client
 from jarvis.core.arbiter  import SteerArbiter
 from jarvis.core.config   import load_config
 from jarvis.core.clarify  import missing_slot_question
@@ -66,7 +67,7 @@ class JarvisPipeline:
         self.stt         = STTEngine()
         self.tts         = TTSEngine()
         self.mood        = MoodEngine()
-        self.llm         = OllamaClient()
+        self.llm         = make_llm_client()
         self.arbiter     = SteerArbiter(self.tts, self.llm)
         self.screen_tool = ScreenTool()
         self.tool_router = ToolRouter()

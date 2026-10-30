@@ -4,8 +4,31 @@ from unittest.mock import AsyncMock
 import pytest
 
 from jarvis.memory.facts import FactMemory, _normalize
-from jarvis.tools.knowledge import looks_private
+from jarvis.tools.knowledge import looks_private, _concise
 from jarvis.tools.router import ToolRouter, registry
+
+
+# ── Concise web-answer cleaner ───────────────────────────────────────────
+def test_concise_strips_source_citations():
+    verbose = ('The capital of France is Paris, as stated in the source from '
+               'Facebook: "The capital of France __ Paris (is/are)." The other '
+               'source on Quora does not provide information about the capital of France.')
+    out = _concise(verbose)
+    assert out == "The capital of France is Paris."
+    assert "source" not in out.lower() and "facebook" not in out.lower()
+
+
+def test_concise_keeps_clean_answer_but_caps_length():
+    clean = ("Pride and Prejudice is a novel by English author Jane Austen. "
+             "Written when she was aged 20-21, it was her third novel.")
+    out = _concise(clean, max_chars=240)
+    assert out.startswith("Pride and Prejudice is a novel by English author Jane Austen.")
+    assert len(out) <= 240
+
+
+def test_concise_handles_empty():
+    assert _concise("") == ""
+
 
 
 # ── Fact memory ──────────────────────────────────────────────────────────
