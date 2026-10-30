@@ -614,16 +614,16 @@ class JarvisPipeline:
             self._ui_server.start()
         except Exception as e:
             logger.debug(f"[UI] server not started: {e}")
-        if ui_cfg.get("launch_orb", True):
+        if ui_cfg.get("launch_island", True):
             try:
                 import subprocess, sys
                 py = sys.executable
                 pyw = py.replace("python.exe", "pythonw.exe")
                 exe = pyw if Path(pyw).exists() else py
                 flags = 0x08000000 if __import__("sys").platform == "win32" else 0
-                subprocess.Popen([exe, "-m", "jarvis.ui.orb"], creationflags=flags, cwd=str(Path.cwd()))
+                subprocess.Popen([exe, "-m", "jarvis.ui.island"], creationflags=flags, cwd=str(Path.cwd()))
             except Exception as e:
-                logger.debug(f"[UI] orb not launched: {e}")
+                logger.debug(f"[UI] island not launched: {e}")
         if ui_cfg.get("launch_hud", True):
             try:
                 import subprocess, sys

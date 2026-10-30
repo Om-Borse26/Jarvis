@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Jarvis Island</title>
+<style>
+  :root{
+    --bg:#05070d; --panel:rgba(255,255,255,0.05); --border:rgba(120,200,255,0.18);
+    --accent:#1e90ff; --good:#00e6b4; --text:#dce8ff; --muted:#7f93b5;
+    --g1:#2bd4ff; --g2:#1e6bff; --glow:rgba(43,150,255,.55);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);
+    font-family:"Segoe UI",system-ui,sans-serif;color:var(--text);
+    -webkit-user-select:none;user-select:none;}
+  #island{width:100%;height:100%;display:flex;flex-direction:column;
+    background:linear-gradient(180deg,#0b1020 0%,#05070d 100%);
+    border:1px solid var(--border);border-radius:26px;overflow:hidden;
+    box-shadow:0 10px 40px rgba(0,0,0,.6), inset 0 0 0 1px rgba(255,255,255,.03);}
+
+  /* state palettes */
+  #island.listening{--g1:#43ffce;--g2:#00c6a7;--glow:rgba(0,230,180,.7);}
+  #island.thinking {--g1:#c59bff;--g2:#7b3cff;--glow:rgba(139,92,246,.7);}
+  #island.speaking {--g1:#7fe3ff;--g2:#1e90ff;--glow:rgba(30,144,255,.8);}
+
+  /* ── Collapsed pill ─────────────────────────────────────────── */
+  .pill{flex:1;display:flex;align-items:center;gap:12px;padding:0 16px;cursor:pointer;}
+  .spark{position:relative;width:26px;height:26px;flex:none;display:flex;align-items:center;justify-content:center;}
+  .dot{width:16px;height:16px;border-radius:50%;
+    background:radial-gradient(circle at 36% 30%,rgba(255,255,255,.7) 0%,transparent 40%),
+      radial-gradient(circle at 50% 50%,var(--g1) 0%,var(--g2) 70%);
+    box-shadow:0 0 14px 2px var(--glow);animation:breathe 4s ease-in-out infinite;}
+  .eq{display:none;align-items:flex-end;gap:2px;height:16px;}
+  .eq i{width:3px;height:6px;border-radius:2px;background:var(--g1);box-shadow:0 0 6px var(--glow);
+    animation:bounce 1s ease-in-out infinite;}
+  .eq i:nth-child(2){animation-delay:.15s;} .eq i:nth-child(3){animation-delay:.3s;}
+  .eq i:nth-child(4){animation-delay:.45s;}
+  #island.listening .dot,#island.speaking .dot{display:none;}
+  #island.listening .eq,#island.speaking .eq{display:flex;}
+  .label{flex:1;font-size:13px;letter-spacing:.5px;color:#cfe2ff;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis;}
+  .label .brand{letter-spacing:3px;font-weight:600;color:#eaf4ff;}
+  .hint{font-size:11px;color:var(--muted);opacity:.7;}
+  #island:not(.collapsed) .pill{display:none;}
+
+  /* ── Expanded panels ────────────────────────────────────────── */
+  .panel{flex:1;display:none;flex-direction:column;min-height:0;}
+  #island.mini .panel.mini,#island.tools .panel.tools{display:flex;}
+  .phead{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border);}
+  .phead .pdot{width:10px;height:10px;border-radius:50%;background:var(--g1);box-shadow:0 0 10px var(--glow);}
+  .phead h3{margin:0;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);flex:1;}
+  .nav{display:flex;gap:6px;}
+  .nav button,.xbtn{background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--text);
+    width:28px;height:26px;border-radius:8px;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;}
+  .nav button:hover,.xbtn:hover{background:rgba(30,144,255,.25);}
+  .pbody{flex:1;overflow:auto;padding:10px 14px;}
+  .pbody::-webkit-scrollbar{width:6px;} .pbody::-webkit-scrollbar-thumb{background:#1b2847;border-radius:3px;}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 2px;
+    border-bottom:1px solid rgba(255,255,255,.05);font-size:13px;}
+  .row:last-child{border-bottom:none;}
+  .muted{color:var(--muted);font-size:12px;}
+  .open-full{margin:10px 14px;padding:9px;border-radius:10px;text-align:center;cursor:pointer;
+    background:linear-gradient(90deg,var(--g2),var(--g1));color:#05121f;font-weight:600;font-size:12px;letter-spacing:.5px;}
+  /* toggle */
+  .switch{position:relative;width:40px;height:22px;flex:none;}
+  .switch input{opacity:0;width:0;height:0;}
+  .slider{position:absolute;inset:0;background:#2a3550;border-radius:22px;cursor:pointer;transition:.2s;}
+  .slider:before{content:"";position:absolute;height:16px;width:16px;left:3px;top:3px;background:#8aa0c8;border-radius:50%;transition:.2s;}
+  input:checked + .slider{background:var(--good);}
+  input:checked + .slider:before{transform:translateX(18px);background:#06263a;}
+
+  /* ── Full dashboard ─────────────────────────────────────────── */
+  .dash{flex:1;display:none;position:relative;}
+  #island.dashboard .dash{display:flex;}
+  #island.dashboard{border-radius:18px;}
+  .dash iframe{flex:1;border:0;width:100%;height:100%;background:var(--bg);}
+  .dash .collapse{position:absolute;top:10px;right:12px;z-index:5;background:rgba(10,16,32,.8);
+    border:1px solid var(--border);color:var(--text);border-radius:10px;padding:6px 10px;cursor:pointer;font-size:12px;}
+
+  @keyframes breathe{0%,100%{transform:scale(1);}50%{transform:scale(1.12);}}
+  @keyframes bounce{0%,100%{height:5px;}50%{height:16px;}}
+  .fade{animation:fadein .25s ease;}
+  @keyframes fadein{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
+</style>
+</head>
+<body>
+<div id="island" class="collapsed idle">
+  <!-- Collapsed pill -->
+  <div class="pill" id="pill" title="Click to open dashboard">
+    <div class="spark">
+      <div class="dot"></div>
+      <div class="eq"><i></i><i></i><i></i><i></i></div>
+    </div>
+    <div class="label"><span class="brand">JARVIS</span> <span id="capt"></span></div>
+    <div class="hint">▾</div>
+  </div>
+
+  <!-- Mini panel: reminders & schedule -->
+  <div class="panel mini">
+    <div class="phead">
+      <span class="pdot"></span><h3>Reminders &amp; Schedule</h3>
+      <div class="nav">
+        <button data-mode="tools" title="Tools &amp; access">›</button>
+        <button class="xbtn" data-mode="collapsed" title="Collapse">×</button>
+      </div>
+    </div>
+    <div class="pbody" id="remBody"><div class="muted">Loading…</div></div>
+    <div class="open-full" data-mode="dashboard">Open full dashboard</div>
+  </div>
+
+  <!-- Tools panel: access toggles -->
+  <div class="panel tools">
+    <div class="phead">
+      <div class="nav"><button data-mode="mini" title="Back">‹</button></div>
+      <h3>Tools &amp; Access</h3>
+      <div class="nav"><button class="xbtn" data-mode="collapsed" title="Collapse">×</button></div>
+    </div>
+    <div class="pbody" id="toolBody"><div class="muted">Loading…</div></div>
+    <div class="open-full" data-mode="dashboard">Open full dashboard</div>
+  </div>
+
+  <!-- Full dashboard -->
+  <div class="dash">
+    <button class="collapse" data-mode="collapsed">▴ Collapse</button>
+    <iframe id="dashFrame" title="Dashboard"></iframe>
+  </div>
+</div>
+
+<script>
+  const island = document.getElementById("island");
+  const STATES = ["idle","listening","thinking","speaking"];
+  let mode = "collapsed";
+  let lastSeq = -1;
+  let collapseTimer = null;
+
+  function native(fn, arg){
+    try { if (window.pywebview && window.pywebview.api && window.pywebview.api[fn])
+      window.pywebview.api[fn](arg); } catch(e){}
+  }
+
+  function setMode(next){
+    if (!["collapsed","mini","tools","dashboard"].includes(next)) return;
+    mode = next;
+    island.classList.remove("collapsed","mini","tools","dashboard");
+    island.classList.add(next);
+    native("set_mode", next);
+    if (next === "dashboard"){ native("come_forward"); loadDash(); }
+    else if (next === "collapsed"){ native("send_back"); }
+    else { native("come_forward"); }
+    if (next === "mini") loadReminders();
+    if (next === "tools") loadTools();
+  }
+
+  // Hover to expand, leave to collapse (never auto-collapse the full dashboard).
+  island.addEventListener("mouseenter", () => {
+    if (collapseTimer){ clearTimeout(collapseTimer); collapseTimer = null; }
+    if (mode === "collapsed") setMode("mini");
+  });
+  island.addEventListener("mouseleave", () => {
+    if (mode === "dashboard") return;
+    collapseTimer = setTimeout(() => { if (mode !== "dashboard") setMode("collapsed"); }, 450);
+  });
+  document.getElementById("pill").addEventListener("click", () => setMode("dashboard"));
+  document.querySelectorAll("[data-mode]").forEach(el =>
+    el.addEventListener("click", e => { e.stopPropagation(); setMode(el.getAttribute("data-mode")); }));
+
+  // ── Data loaders ──
+  async function loadReminders(){
+    const body = document.getElementById("remBody");
+    try{
+      const r = await fetch("/api/reminders",{cache:"no-store"});
+      const d = await r.json();
+      const items = d.reminders || [];
+      body.innerHTML = items.length ? items.map(x =>
+        `<div class="row"><span>${esc(x.text || x.title || "Reminder")}</span>
+         <span class="muted">${esc(x.when || x.time || "")}</span></div>`).join("")
+        : `<div class="muted">No reminders or meetings scheduled.</div>`;
+      body.classList.add("fade");
+    }catch(e){ body.innerHTML = `<div class="muted">Couldn't load reminders.</div>`; }
+  }
+  async function loadTools(){
+    const body = document.getElementById("toolBody");
+    try{
+      const r = await fetch("/api/permissions",{cache:"no-store"});
+      const d = await r.json();
+      const cats = d.categories || [];
+      const pol = (d.policy && d.policy.categories) || d.policy || {};
+      body.innerHTML = cats.map(c => {
+        const on = pol[c] !== false;
+        return `<div class="row"><span>${esc(c)}</span>
+          <label class="switch"><input type="checkbox" data-cat="${esc(c)}" ${on?"checked":""}>
+          <span class="slider"></span></label></div>`;
+      }).join("") || `<div class="muted">No tool categories.</div>`;
+      body.querySelectorAll("input[data-cat]").forEach(inp =>
+        inp.addEventListener("change", () => toggleCat(inp.getAttribute("data-cat"), inp.checked)));
+      body.classList.add("fade");
+    }catch(e){ body.innerHTML = `<div class="muted">Couldn't load tools.</div>`; }
+  }
+  async function toggleCat(cat, enabled){
+    try{ await fetch("/api/permissions",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({category:cat,enabled})}); }catch(e){}
+  }
+  function loadDash(){
+    const f = document.getElementById("dashFrame");
+    if (!f.getAttribute("src")) f.setAttribute("src","/dashboard");
+  }
+  const esc = s => String(s).replace(/[&<>"]/g, c =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+  // ── Polling: state animation, external directives, heartbeat ──
+  async function pollState(){
+    try{
+      const s = await (await fetch("/api/state",{cache:"no-store"})).json();
+      const st = STATES.includes(s.state) ? s.state : "idle";
+      STATES.forEach(x => island.classList.toggle(x, x === st));
+      document.getElementById("capt").textContent =
+        st === "idle" ? "" : (s.text ? s.text.slice(0,42) : st + "…");
+    }catch(e){}
+  }
+  async function pollDirective(){
+    try{
+      const u = await (await fetch("/api/ui",{cache:"no-store"})).json();
+      if (u.seq !== lastSeq){
+        lastSeq = u.seq;
+        if (u.forward) native("come_forward");
+        if (u.mode) setMode(u.mode);
+      }
+    }catch(e){}
+  }
+  function heartbeat(){
+    fetch("/api/ui",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({heartbeat:true})}).catch(()=>{});
+  }
+  setInterval(pollState, 200);
+  setInterval(pollDirective, 300);
+  setInterval(heartbeat, 2000);
+  pollState(); heartbeat();
+</script>
+</body>
+</html>

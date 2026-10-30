@@ -43,3 +43,47 @@ class StateBridge:
 
 # Process-wide singleton
 state_bridge = StateBridge()
+
+
+class UIDirective:
+    """
+    Out-of-band UI commands for the Dynamic Island (singleton).
+
+    Voice/tools push a desired mode ('collapsed' | 'mini' | 'tools' | 'dashboard')
+    and/or a z-order hint ('forward'). The island process polls a monotonically
+    increasing `seq` and only *acts* when it changes, so a repeated "open
+    dashboard" re-triggers even if the mode is unchanged. The island also sends
+    a heartbeat so callers can tell whether it's actually running.
+    """
+
+    MODES = {"collapsed", "mini", "tools", "dashboard"}
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._mode = "collapsed"
+        self._forward = False
+        self._seq = 0
+        self._last_beat = 0.0
+
+    def set(self, mode: str | None = None, forward: bool | None = None) -> None:
+        with self._lock:
+            if mode in self.MODES:
+                self._mode = mode
+            if forward is not None:
+                self._forward = bool(forward)
+            self._seq += 1
+
+    def heartbeat(self) -> None:
+        with self._lock:
+            self._last_beat = time.time()
+
+    def is_alive(self, within: float = 4.0) -> bool:
+        with self._lock:
+            return (time.time() - self._last_beat) < within
+
+    def snapshot(self) -> Dict:
+        with self._lock:
+            return {"mode": self._mode, "forward": self._forward, "seq": self._seq}
+
+
+ui_directive = UIDirective()

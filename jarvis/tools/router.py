@@ -50,6 +50,10 @@ class ToolRouter:
             "bring up the dashboard": "open_dashboard", "bring up your dashboard": "open_dashboard",
             "turn yourself off": "stop_jarvis", "shut yourself down": "stop_jarvis",
             "list mcp servers": "list_mcp_servers", "list the mcp servers": "list_mcp_servers",
+            "come forward": "island_come_forward", "come ahead": "island_come_forward",
+            "focus on yourself": "island_come_forward", "show yourself": "island_come_forward",
+            "step back": "island_send_back", "step aside": "island_send_back",
+            "minimize yourself": "island_send_back", "go to the background": "island_send_back",
         }
         command = re.sub(r"^(?:can you |could you |please )", "", text)
         if command in instant:

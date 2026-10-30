@@ -101,6 +101,8 @@ class _Handler(BaseHTTPRequestHandler):
             return self._file("dashboard.html")
         if r == "/orb":
             return self._file("orb.html")
+        if r == "/island":
+            return self._file("island.html")
         if r == "/hud":
             return self._file_abs(Path(__file__).resolve().parents[1] / "hud" / "web" / "hud.html")
         if r.startswith("/static/"):
@@ -108,6 +110,9 @@ class _Handler(BaseHTTPRequestHandler):
         if r == "/api/state":
             from jarvis.ui.state import state_bridge
             return self._json(state_bridge.snapshot())
+        if r == "/api/ui":
+            from jarvis.ui.state import ui_directive
+            return self._json(ui_directive.snapshot())
         if r == "/api/permissions":
             from jarvis.core.permissions import permission_policy, KNOWN_CATEGORIES
             return self._json({"categories": KNOWN_CATEGORIES, "policy": permission_policy.as_dict()})
@@ -130,6 +135,13 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         r = self.path.split("?")[0]
         body = self._body()
+        if r == "/api/ui":
+            from jarvis.ui.state import ui_directive
+            if body.get("heartbeat"):
+                ui_directive.heartbeat()
+                return self._json({"ok": True})
+            ui_directive.set(mode=body.get("mode"), forward=body.get("forward"))
+            return self._json({"ok": True, "ui": ui_directive.snapshot()})
         if r == "/api/permissions":
             from jarvis.core.permissions import permission_policy
             cat = body.get("category", "")
@@ -182,12 +194,16 @@ class ControlServer:
 
 @register_tool(
     name="open_dashboard",
-    description="Open the Jarvis dashboard (stats, reminders, access controls) in the browser.",
+    description="Open the Jarvis dashboard (stats, reminders, access controls). Morphs the Dynamic Island into the full dashboard if it's running, else opens it in the browser.",
     category="system",
 )
 def open_dashboard() -> str:
-    """Open the local dashboard in the default browser."""
+    """Open the dashboard — via the Island if alive, otherwise the browser."""
     try:
+        from jarvis.ui.state import ui_directive
+        ui_directive.set(mode="dashboard", forward=True)
+        if ui_directive.is_alive():
+            return "Opening your dashboard."
         import webbrowser
         from jarvis.core.config import load_config
         port = int(load_config().get("ui", {}).get("http_port", 8787))
@@ -195,3 +211,27 @@ def open_dashboard() -> str:
         return "Opening your dashboard."
     except Exception as e:
         return f"I couldn't open the dashboard: {e}"
+
+
+@register_tool(
+    name="island_come_forward",
+    description="Bring the Jarvis Dynamic Island to the front/on top of other windows. Use for 'come forward', 'focus on yourself', 'show yourself'.",
+    category="system",
+)
+def island_come_forward() -> str:
+    """Raise the Island above other windows."""
+    from jarvis.ui.state import ui_directive
+    ui_directive.set(forward=True)
+    return "Coming forward, Sir."
+
+
+@register_tool(
+    name="island_send_back",
+    description="Send the Jarvis Dynamic Island back to the desktop (not on top) and collapse it. Use for 'go back', 'step back', 'minimize yourself'.",
+    category="system",
+)
+def island_send_back() -> str:
+    """Collapse the Island and drop it behind other windows."""
+    from jarvis.ui.state import ui_directive
+    ui_directive.set(mode="collapsed", forward=False)
+    return "Stepping back, Sir."
