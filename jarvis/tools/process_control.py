@@ -186,12 +186,20 @@ def is_app_open(app_query: str) -> bool:
 
 
 def _bring_to_front(hwnd) -> bool:
-    """Force a window to the foreground using the AttachThreadInput dance."""
+    """Force a window to the foreground using the AttachThreadInput + Alt-key unlock."""
     try:
         import ctypes
         import win32con
+        import win32gui
 
         user32 = ctypes.windll.user32
+        # Unlock Windows SetForegroundWindow restriction by simulating Alt key tap
+        try:
+            user32.keybd_event(0x12, 0, 0, 0)  # VK_MENU down
+            user32.keybd_event(0x12, 0, 2, 0)  # VK_MENU up
+        except Exception:
+            pass
+
         cur_fg = user32.GetForegroundWindow()
         cur_thread = user32.GetWindowThreadProcessId(cur_fg, None)
         my_thread = ctypes.windll.kernel32.GetCurrentThreadId()
@@ -199,11 +207,12 @@ def _bring_to_front(hwnd) -> bool:
             user32.AttachThreadInput(cur_thread, my_thread, True)
             user32.ShowWindow(hwnd, win32con.SW_RESTORE)
             user32.SetForegroundWindow(hwnd)
+            user32.BringWindowToTop(hwnd)
             user32.AttachThreadInput(cur_thread, my_thread, False)
         except Exception:
-            import win32gui
             win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
             win32gui.SetForegroundWindow(hwnd)
+            win32gui.BringWindowToTop(hwnd)
         return True
     except Exception as e:
         logger.debug(f"bring_to_front notice: {e}")
@@ -457,6 +466,9 @@ class DynamicAppResolver:
         if rules_engine.should_reuse_window(clean_q, force_new):
             win = find_app_window(clean_q)
             if win:
+                if not background:
+                    _bring_to_front(win[0])
+                    return f"Switched to {_app_label(clean_q)}, Sir."
                 logger.info(f"🔄 '{win[1]}' already open — leaving it in the background (no focus steal).")
                 label = _app_label(clean_q)
                 return f"{label} is already open, Sir. Say 'switch to {label}' to bring it up."

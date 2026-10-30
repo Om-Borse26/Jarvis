@@ -52,13 +52,15 @@ HOMOPHONE_MAP = [
 # Conversational prefix and suffix wrappers
 WRAPPER_PREFIXES = [
     r"^(?:hey\s+|hi\s+|hello\s+)?(?:jarvis[,\s]+)?",
-    r"^(?:do\s+one\s+thing[,\s]+)?",
+    r"^(?:just\s+do\s+one\s+thing[\.,\s]+|do\s+one\s+thing[\.,\s]+)?",
     r"^(?:now\s+try\s+|try\s+(?:to\s+)?|now\s+can\s+you\s+)",
-    r"^(?:can\s+you\s+|could\s+you\s+|would\s+you\s+|will\s+you\s+)(?:please\s+)?(?:just\s+)?",
-    r"^(?:then\s+you\s+|and\s+then\s+|now\s+you\s+|so\s+you\s+)",
+    r"^(?:and\s+you\s+|and\s+then\s+|and\s+|then\s+you\s+|then\s+|also\s+you\s+|also\s+|so\s+you\s+|so\s+)",
+    r"^(?:can\s+you\s+also\s+|also\s+can\s+you\s+|can\s+you\s+just\s+|can\s+you\s+|could\s+you\s+|would\s+you\s+|will\s+you\s+)(?:please\s+)?(?:just\s+)?",
     r"^(?:i\s+want\s+(?:you\s+to\s+|to\s+)?|i\s+need\s+(?:you\s+to\s+|to\s+)?|please\s+)",
     r"^(?:let\s+me[,\s]+)?(?:can\s+you\s+just\s+|can\s+you\s+)",
+    r"^(?:just\s+)",
 ]
+
 
 
 class SpeechNormalizer:

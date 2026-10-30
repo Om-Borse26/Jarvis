@@ -131,6 +131,8 @@ class JarvisPipeline:
         # ── UI: state bridge + control server (orb + dashboard) ─────────
         self._ui_server: Optional[ControlServer] = None
         self._eve_server = None
+        self._island_proc = None
+        self._hud_proc = None
         self.tts.on_speaking_start = lambda: state_bridge.set("speaking")
         self.tts.on_speaking_stop  = lambda: state_bridge.set("idle")
 
@@ -232,6 +234,16 @@ class JarvisPipeline:
             self._ui_server.stop()
         if self._eve_server:
             self._eve_server.stop()
+        for proc_name, proc in [("island", self._island_proc), ("hud", self._hud_proc)]:
+            if proc and proc.poll() is None:
+                try:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=2)
+                    except Exception:
+                        proc.kill()
+                except Exception as e:
+                    logger.debug(f"[UI] error terminating {proc_name}: {e}")
         lifecycle.release_single_instance()
         logger.info("Jarvis shut down.")
 
@@ -645,24 +657,46 @@ class JarvisPipeline:
             self._ui_server.start()
         except Exception as e:
             logger.debug(f"[UI] server not started: {e}")
+        # Clean up any leftover stale UI processes from earlier runs
+        try:
+            import psutil, os
+            for p in psutil.process_iter(["pid", "cmdline"]):
+                cmd = " ".join(p.info.get("cmdline") or [])
+                if "jarvis.ui.island" in cmd or "jarvis.hud.window" in cmd:
+                    if p.pid != os.getpid():
+                        try:
+                            p.terminate()
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
         if ui_cfg.get("launch_island", True):
             try:
-                import subprocess, sys
+                import subprocess, sys, os
                 py = sys.executable
                 pyw = py.replace("python.exe", "pythonw.exe")
                 exe = pyw if Path(pyw).exists() else py
                 flags = 0x08000000 if __import__("sys").platform == "win32" else 0
-                subprocess.Popen([exe, "-m", "jarvis.ui.island"], creationflags=flags, cwd=str(Path.cwd()))
+                self._island_proc = subprocess.Popen(
+                    [exe, "-m", "jarvis.ui.island", f"--parent-pid={os.getpid()}"],
+                    creationflags=flags,
+                    cwd=str(Path.cwd()),
+                )
             except Exception as e:
                 logger.debug(f"[UI] island not launched: {e}")
         if ui_cfg.get("launch_hud", True):
             try:
-                import subprocess, sys
+                import subprocess, sys, os
                 py = sys.executable
                 pyw = py.replace("python.exe", "pythonw.exe")
                 exe = pyw if Path(pyw).exists() else py
                 flags = 0x08000000 if __import__("sys").platform == "win32" else 0
-                subprocess.Popen([exe, "-m", "jarvis.hud.window"], creationflags=flags, cwd=str(Path.cwd()))
+                self._hud_proc = subprocess.Popen(
+                    [exe, "-m", "jarvis.hud.window", f"--parent-pid={os.getpid()}"],
+                    creationflags=flags,
+                    cwd=str(Path.cwd()),
+                )
             except Exception as e:
                 logger.debug(f"[HUD] window not launched: {e}")
 

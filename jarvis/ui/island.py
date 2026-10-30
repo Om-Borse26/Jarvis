@@ -107,6 +107,7 @@ class _NativeWorker:
         sw = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
         sh = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
         x, y, w, h, r = compute_geometry(mode, sw, sh, self._scale(hwnd))
+        r = min(r, h // 2)
         flags = win32con.SWP_NOACTIVATE | win32con.SWP_NOZORDER | 0x4000  # SWP_ASYNCWINDOWPOS
         win32gui.SetWindowPos(hwnd, 0, x, y, w, h, flags)
         region = win32gui.CreateRoundRectRgn(0, 0, w + 1, h + 1, r * 2, r * 2)
@@ -141,18 +142,46 @@ class IslandApi:
     def __init__(self, worker: _NativeWorker) -> None:
         self._worker = worker
 
-    def set_mode(self, mode: str) -> bool:
+    def set_mode(self, mode: str = "collapsed", *args, **kwargs) -> bool:
         if mode in MODES:
             self._worker.submit("mode", mode)
         return True
 
-    def come_forward(self) -> bool:
+    def come_forward(self, *args, **kwargs) -> bool:
         self._worker.submit("z", "front")
         return True
 
-    def send_back(self) -> bool:
+    def send_back(self, *args, **kwargs) -> bool:
         self._worker.submit("z", "back")
         return True
+
+
+def _start_parent_watchdog() -> None:
+    """Exit automatically if the parent process dies to prevent orphaned windows."""
+    import os, time, sys
+    parent_pid = None
+    for arg in sys.argv:
+        if arg.startswith("--parent-pid="):
+            try:
+                parent_pid = int(arg.split("=", 1)[1])
+            except Exception:
+                pass
+    if parent_pid is None:
+        try:
+            parent_pid = os.getppid()
+        except Exception:
+            return
+    if not parent_pid or parent_pid <= 1:
+        return
+
+    def _watch():
+        import psutil
+        while True:
+            time.sleep(1.0)
+            if not psutil.pid_exists(parent_pid):
+                os._exit(0)
+
+    threading.Thread(target=_watch, name="parent-watchdog", daemon=True).start()
 
 
 def run() -> None:
@@ -161,6 +190,8 @@ def run() -> None:
     except Exception:
         logger.error("[Island] pywebview is required for the island window.")
         return
+
+    _start_parent_watchdog()
 
     port = _ui_port()
     worker = _NativeWorker()
@@ -184,6 +215,7 @@ def run() -> None:
         easy_drag=False,
         on_top=False,
         resizable=False,
+        min_size=(100, 20),
         background_color="#05070d",
         js_api=api,
     )
@@ -199,3 +231,4 @@ def run() -> None:
 
 if __name__ == "__main__":
     run()
+

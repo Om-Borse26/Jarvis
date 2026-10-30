@@ -287,6 +287,45 @@ class OllamaClient:
                     tool_calls = []
                     content = "I couldn't interpret that action safely. Please rephrase your request."
 
+            # If not a pure JSON candidate, search for embedded JSON tool call objects
+            if not tool_calls and content and "name" in content:
+                found_calls = []
+                cleaned_text = content
+                starts = [i for i, c in enumerate(content) if c == "{"]
+                for start in starts:
+                    depth = 0
+                    for i in range(start, len(content)):
+                        if content[i] == "{":
+                            depth += 1
+                        elif content[i] == "}":
+                            depth -= 1
+                            if depth == 0:
+                                cand = content[start : i + 1]
+                                try:
+                                    parsed = json.loads(cand)
+                                    if isinstance(parsed, dict) and ("name" in parsed or "function" in parsed):
+                                        found_calls.append((cand, parsed))
+                                except Exception:
+                                    pass
+                                break
+
+                for raw_str, call in found_calls:
+                    function = call.get("function", call)
+                    name = function.get("name")
+                    arguments = function.get("arguments", {})
+                    if isinstance(arguments, str):
+                        try:
+                            arguments = json.loads(arguments)
+                        except Exception:
+                            arguments = {}
+                    if isinstance(name, str) and name and isinstance(arguments, dict):
+                        tool_calls.append({"name": name, "arguments": arguments})
+                        cleaned_text = cleaned_text.replace(raw_str, "")
+
+                if tool_calls:
+                    content = re.sub(r"<tool_call>.*?</tool_call>", "", cleaned_text, flags=re.DOTALL)
+                    content = re.sub(r"```(?:json)?\s*```", "", content).strip()
+
         return {"content": content, "tool_calls": tool_calls}
 
     async def warm_up(self):

@@ -44,7 +44,7 @@ class ToolRouter:
         if youtube:
             result = await registry.execute("search_youtube", query=youtube.group(1))
             return result.get("result", result.get("message"))
-        if re.search(r"\b(?:and|then|also)\b", text):
+        if re.search(r"\b(?:and|then|also)\b", clean_cmd):
             return None
         instant = {
             "open dashboard": "open_dashboard", "open the dashboard": "open_dashboard",
@@ -55,11 +55,32 @@ class ToolRouter:
             "focus on yourself": "island_come_forward", "show yourself": "island_come_forward",
             "step back": "island_send_back", "step aside": "island_send_back",
             "minimize yourself": "island_send_back", "go to the background": "island_send_back",
+            "collapse dashboard": "island_send_back", "collapse the dashboard": "island_send_back",
+            "collapse the dashboard remove it": "island_send_back",
+            "just collapse the dashboard remove it": "island_send_back",
+            "close dashboard": "island_send_back", "close the dashboard": "island_send_back",
         }
         command = re.sub(r"^(?:can you |could you |please )", "", text)
-        if command in instant:
-            result = await registry.execute(instant[command])
+        clean_no_punct = re.sub(r"[^\w\s]", "", clean_cmd).strip()
+        if command in instant or clean_cmd in instant or clean_no_punct in instant:
+            target_tool = instant.get(command) or instant.get(clean_cmd) or instant.get(clean_no_punct)
+            result = await registry.execute(target_tool)
             return result.get("result", result.get("message"))
+
+        # ── Reminders & Timers Fast Path ───────────────────────────────────
+        rem_m = re.match(
+            r"^(?:set\s+a\s+reminder|remind\s+me)\s+(?:after|in)\s+(\d+|one|two|three|four|five|ten|fifteen|twenty|thirty)\s+(minute|minutes|min|mins|second|seconds|sec|secs|hour|hours)\s+(?:to\s+)?(.+)$",
+            clean_cmd,
+        )
+        if rem_m:
+            word_to_num = {"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "ten": "10", "fifteen": "15", "twenty": "20", "thirty": "30"}
+            num_str = rem_m.group(1).lower()
+            num = word_to_num.get(num_str, num_str)
+            unit = rem_m.group(2).lower()
+            task_text = rem_m.group(3).strip()
+            when_str = f"in {num} {unit}"
+            res = await registry.execute("set_reminder", text=task_text, when=when_str)
+            return res.get("result", f"Reminder set for {when_str}: {task_text}")
 
         # ── Run a saved routine/procedure ─────────────────────────────────
         # "run my work routine", "start my morning routine", "do my gaming setup"
@@ -343,12 +364,13 @@ class ToolRouter:
         yt_patterns = [
             r"(?:search\s+youtube\s+(?:for\s+)?)(.+)",
             r"(?:search\s+(?:for\s+)?)(.+?)(?:\s+on\s+youtube)",
+            r"(?:(?:can\s+you\s+)?search\s+(?:for\s+|some\s+)?)(.+?)(?:\s+videos|\s+on\s+youtube)",
             r"(?:open\s+(?:up\s+)?)(.+?)(?:\s+(?:on\s+youtube|videos))",
             r"(?:play\s+)(.+?)(?:\s+on\s+youtube)",
             r"(?:i\s+want(?:ed)?\s+to\s+see\s+(?:some\s+)?)(.+?)(?:\s+videos|\s+on\s+youtube)",
             r"(?:can\s+you\s+open\s+(?:up\s+)?)(.+?)(?:\s+videos|\s+on\s+youtube)",
             r"(?:show\s+(?:me\s+)?)(.+?)(?:\s+on\s+youtube|\s+videos)",
-            r"^open\s+(?:up\s+)?(.+?)\s+videos$",
+            r"^(?:open|search)\s+(?:up\s+|for\s+|some\s+)?(.+?)\s+videos$",
         ]
         for pattern in yt_patterns:
             m = re.search(pattern, clean_for_ch)
@@ -421,6 +443,15 @@ class ToolRouter:
             r"^(?:jarvis\s+)?(?:switch(?:\s+back)?\s+to|focus(?:\s+on)?|show\s+me|bring\s+up|go\s+to|jump\s+to)\s+(?:the\s+)?([a-zA-Z0-9_\-\.\s]+?)(?:\s+window|\s+please|\s+for\s+me|\s+again)?$",
             clean_cmd
         )
+        if not focus_match:
+            sub_focus = re.search(r"(?:focus\s+(?:on\s+)?|switch\s+to\s+)(?:the\s+)?([a-zA-Z0-9_\-]+)", clean_cmd)
+            if sub_focus and sub_focus.group(1).lower() not in ("it", "this", "that", "the"):
+                focus_match = sub_focus
+            elif "focus on it" in clean_cmd or "focus it" in clean_cmd:
+                sub_app = re.search(r"(?:open|launch)\s+(?:the\s+)?([a-zA-Z0-9_\-]+)", clean_cmd)
+                if sub_app and sub_app.group(1).lower() not in ("it", "this", "that"):
+                    focus_match = sub_app
+
         if not focus_match and clean_cmd in ("focus", "jarvis focus"):
             # Bare "focus" with no target — ask which app rather than guessing.
             return "Which application should I switch to, Sir?"

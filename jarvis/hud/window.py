@@ -64,12 +64,42 @@ def _watch(port: int, window) -> None:
         time.sleep(0.4)
 
 
+def _start_parent_watchdog() -> None:
+    """Exit automatically if the parent process dies to prevent orphaned windows."""
+    import os, time, sys
+    parent_pid = None
+    for arg in sys.argv:
+        if arg.startswith("--parent-pid="):
+            try:
+                parent_pid = int(arg.split("=", 1)[1])
+            except Exception:
+                pass
+    if parent_pid is None:
+        try:
+            parent_pid = os.getppid()
+        except Exception:
+            return
+    if not parent_pid or parent_pid <= 1:
+        return
+
+    def _watch():
+        import psutil
+        while True:
+            time.sleep(1.0)
+            if not psutil.pid_exists(parent_pid):
+                os._exit(0)
+
+    threading.Thread(target=_watch, name="parent-watchdog", daemon=True).start()
+
+
 def run() -> None:
     try:
         import webview
     except Exception:
         logger.error("[HUD] pywebview is required for the HUD overlay.")
         return
+
+    _start_parent_watchdog()
 
     port = _ui_port()
     try:
@@ -97,3 +127,4 @@ def run() -> None:
 
 if __name__ == "__main__":
     run()
+

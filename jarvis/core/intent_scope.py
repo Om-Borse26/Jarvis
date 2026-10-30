@@ -40,7 +40,17 @@ _GROUPS: dict[str, tuple[list[str], list[str]]] = {
         ["audio", "media", "power", "system"],
         ["volume", "mute", "unmute", "louder", "quieter", "play", "pause", "resume",
          "track", "song", "music", "lock", "sleep", "shutdown", "shut down", "restart",
-         "email", "gmail", "compose", "brightness", "battery"],
+         "email", "gmail", "compose", "brightness", "brighten", "dim", "sound", "audio", "battery", "master volume"],
+    ),
+    "scheduler": (
+        ["scheduler"],
+        ["remind", "reminder", "reminders", "alarm", "schedule", "meeting", "timer",
+         "recurring", "calendar", "appointment", "stand up", "stretch", "drink water"],
+    ),
+    "memory": (
+        ["memory"],
+        ["remember", "favorite", "favourite", "preference", "preferences", "recall",
+         "memory", "memories", "who am i", "my name"],
     ),
     "coding": (
         ["code", "shell"],

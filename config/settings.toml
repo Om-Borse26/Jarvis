@@ -48,7 +48,7 @@ device          = "cpu"        # kokoro runs well on CPU; frees GPU for LLM
 # Provider: "ollama" (local, default) | "groq" | "gemini" | "hybrid".
 # "hybrid" = local model for private turns, cloud model for non-private chat/questions.
 # Can also be set at runtime via env JARVIS_LLM_PROVIDER (keys live in .env).
-provider        = "ollama"
+provider        = "hybrid"
 local_provider  = "ollama"   # used when provider = "hybrid"
 cloud_provider  = "gemini"   # used when provider = "hybrid" (gemini | groq)
 # ── Model routing (tuned for 6 GB VRAM — one model resident at a time) ──

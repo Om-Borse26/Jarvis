@@ -51,6 +51,7 @@ dependencies = [
     "Pillow>=10.0.0",
     "pygetwindow>=0.0.9",
     "comtypes>=1.4.0",
+    "pycaw>=20240210",
     # ── Screen capture & OCR ────────────────────────────────────────────
     "mss>=9.0.0",
     "easyocr>=1.7.0",
